@@ -1,0 +1,103 @@
+name: Release
+
+# Push a tag like v6.0.0 (or publish a release) to build:
+#   nexrabot-linux-amd64 / nexrabot-linux-arm64  — the bot, used by install.sh
+#   nexra-autopay.apk                              — the auto-confirm phone app,
+#                                                    which Nexra Panel can fetch
+#
+# Or run it by hand (Actions → Release → Run workflow) on any branch with a
+# tag: v6.0.0 publishes a release from that branch, v6.0.0-beta.1 a
+# pre-release (use it with RELEASE=v6.0.0-beta.1 bash install.sh …).
+on:
+  push:
+    tags: ['v*']
+    # or: write a version (v6.0.0) into .github/RELEASE_VERSION on any branch
+    # and push — that publishes a release of that branch under that tag
+    branches: ['**']
+    paths: ['.github/RELEASE_VERSION']
+  # a release created on github.com (Releases → Draft a new release, new tag,
+  # target branch) gets the files attached too
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Pre-release tag to create, e.g. v6.0.0-beta.1 (empty = build only)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./... && go test ./...
+      - name: Build
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o dist/nexrabot-linux-$arch ./cmd/nexrabot
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bot
+          path: dist/
+
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon --stacktrace
+      - run: mkdir -p dist && cp android/app/build/outputs/apk/debug/app-debug.apk dist/nexra-autopay.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: dist/
+
+  release:
+    needs: [bot, apk]
+    runs-on: ubuntu-latest
+    # the bot binaries must not wait on the phone app: publish them even if
+    # the APK build failed
+    if: always() && needs.bot.result == 'success' && (github.event_name == 'release' || github.event_name == 'push' || inputs.tag != '')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = push ] && [ "${{ github.ref_type }}" = branch ]; then
+            t=$(tr -d ' \r\n' < .github/RELEASE_VERSION)
+          else
+            t="${{ inputs.tag || github.event.release.tag_name || github.ref_name }}"
+          fi
+          case "$t" in v[0-9]*) ;; *) echo "bad tag '$t'"; exit 1 ;; esac
+          echo "tag=$t" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: |
+          cp install.sh dist/
+          cd dist && sha256sum nexrabot-linux-* install.sh $(ls nexra-autopay.apk 2>/dev/null) > SHA256SUMS && cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          # made from the branch it ran on; a tag with "-" (v6.0.0-beta.1) is a pre-release
+          tag_name: ${{ steps.tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}

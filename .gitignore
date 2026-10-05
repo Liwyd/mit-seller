@@ -1,0 +1,6 @@
+/nexrabot
+/dist/
+__pycache__/
+*.pyc
+/config.env
+/data/
