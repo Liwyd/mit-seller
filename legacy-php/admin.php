@@ -280,7 +280,7 @@ if ($text == $textbotlang['Admin']['keyboardadmin']['add_panel']) {
     }
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['addedpanel'], $backadmin, 'HTML');
     sendmessage($from_id, "🥳", $keyboardadmin, 'HTML');
-    sendmessage($from_id, $textbotlang['Admin']['managepanel']['notemit'], null, 'HTML');
+    sendmessage($from_id, $textbotlang['Admin']['managepanel']['panelnotes'], null, 'HTML');
     step('home', $from_id);
 } elseif ($user['step'] == "add_link_panel") {
     if (!filter_var($text, FILTER_VALIDATE_URL)) {
@@ -318,7 +318,7 @@ if ($text == $textbotlang['Admin']['keyboardadmin']['add_panel']) {
     } elseif ($userdata['type'] == "marzban" || $userdata['type'] == "s_ui" || $userdata['type'] == "marzneshin") {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['notemarzban'], null, 'HTML');
     } elseif ($userdata['type'] == "mit") {
-        sendmessage($from_id, $textbotlang['Admin']['managepanel']['notemit'], null, 'HTML');
+        sendmessage($from_id, $textbotlang['Admin']['managepanel']['panelnotes'], null, 'HTML');
     } elseif ($userdata['type'] == "wgdashboard") {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['wgdashboard'], null, 'HTML');
     } elseif ($userdata['type'] == "mikrotik") {
