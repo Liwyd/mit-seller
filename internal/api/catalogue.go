@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"regexp"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 func randHex(n int) string {

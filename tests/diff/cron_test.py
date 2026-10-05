@@ -8,8 +8,8 @@ from zoneinfo import ZoneInfo
 import pymysql
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-WORK = os.environ.get("DIFF_WORK", "/tmp/nexrabot-diff")
-BIN = os.environ.get("NEXRABOT", "/tmp/nexrabot")
+WORK = os.environ.get("DIFF_WORK", "/tmp/mitseller-diff")
+BIN = os.environ.get("MITSELLER", "/tmp/mitseller")
 BOT, MOCK, TOKEN = "http://127.0.0.1:9102", "http://127.0.0.1:9202", "222:GO"
 FAILS = []
 
@@ -40,7 +40,7 @@ def main():
     db = pymysql.connect(unix_socket="/var/run/mysqld/mysqld.sock", user="root", database="difgo", autocommit=True)
     cur = db.cursor()
     q = lambda sql, *a: (cur.execute(sql, a), cur.fetchall())[1]
-    env = dict(os.environ, NEXRABOT_DISABLE_CRONS="0")
+    env = dict(os.environ, MITSELLER_DISABLE_CRONS="0")
     procs = [subprocess.Popen([sys.executable, os.path.join(HERE, "mock.py"), "9202"]),
              subprocess.Popen([BIN, "serve", "-c", os.path.join(WORK, "go.env")], env=env,
                               stdout=open(os.path.join(WORK, "cron.log"), "w"), stderr=subprocess.STDOUT)]
@@ -59,7 +59,7 @@ def main():
         old, new = "ac%da" % stamp, "ac%db" % stamp
         for oid, ago in ((old, 70), (new, 5)):
             cur.execute("INSERT INTO Payment_report (id_user, id_order, time, price, payment_Status, Payment_Method, invoice) VALUES ('7000000003', %s, %s, '25000', 'waiting', 'cart to cart', '0|0')", (oid, tehran(ago)))
-        cur.execute("REPLACE INTO nexra_kv (k, v) VALUES (%s, 'receipt-photo-1')", ("receipt_" + old,))
+        cur.execute("REPLACE INTO mit_kv (k, v) VALUES (%s, 'receipt-photo-1')", ("receipt_" + old,))
         http("POST", MOCK + "/__clear/" + TOKEN)
         time.sleep(25)
         st = dict(q("SELECT id_order, payment_Status FROM Payment_report WHERE id_order IN (%s, %s)", old, new))

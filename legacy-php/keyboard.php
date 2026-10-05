@@ -473,12 +473,12 @@ $optionMarzban = json_encode([
     ],
     'resize_keyboard' => true
 ]);
-$optionNexra = json_encode([
+$optionMit = json_encode([
     'keyboard' => [
         [['text' => $textbotlang['Admin']['managepanel']['btnshowconnect']], ['text' => $textbotlang['Admin']['managepanel']['showpanelbtn']]],
         [['text' => $textbotlang['Admin']['managepanel']['showpaneltestbtn']]],
         [['text' => $textbotlang['Admin']['managepanel']['keyboardpanel']['namepanel']], ['text' => $textbotlang['Admin']['managepanel']['keyboardpanel']['removepanel']]],
-        [['text' => $textbotlang['Admin']['managepanel']['keyboardpanel']['editnexracreds']]],
+        [['text' => $textbotlang['Admin']['managepanel']['keyboardpanel']['editmitcreds']]],
         [['text' => $textbotlang['Admin']['managepanel']['methodusername']]],
         [['text' => $textbotlang['Admin']['Back-Adminment']]]
     ],
@@ -585,7 +585,7 @@ $typepanel = json_encode([
             ['text' => $textbotlang['Admin']['managepanel']['type']['mikrotik'], 'callback_data' => "typepanel%mikrotik"]
         ],
         [
-            ['text' => $textbotlang['Admin']['managepanel']['type']['nexra'], 'callback_data' => "typepanel%nexra"]
+            ['text' => $textbotlang['Admin']['managepanel']['type']['mit'], 'callback_data' => "typepanel%mit"]
         ],
         [
             ['text' => $textbotlang['Admin']['Back-Adminment'], 'callback_data' => "back_admin"]

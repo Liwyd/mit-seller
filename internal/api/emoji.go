@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/bot"
+	"github.com/Liwyd/mit-seller/internal/bot"
 	"regexp"
 	"strings"
 	"sync"
@@ -104,7 +104,7 @@ func (a *API) getEmojiAllow(w http.ResponseWriter, r *http.Request) {
 	ok(w, map[string]any{"restricted": restricted, "count": len(ids), "ids": ids})
 }
 
-// putEmojiAllow is called by Nexra Panel when its owner changes the packs.
+// putEmojiAllow is called by Mit Panel when its owner changes the packs.
 func (a *API) putEmojiAllow(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Restricted *bool    `json:"restricted"`

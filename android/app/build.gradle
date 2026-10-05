@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace 'site.nexra.autopay'
+    namespace 'site.mit.autopay'
     compileSdk 34
 
     defaultConfig {
-        applicationId "site.nexra.autopay"
+        applicationId "site.mit.autopay"
         minSdk 24
         targetSdk 34
         versionCode 1

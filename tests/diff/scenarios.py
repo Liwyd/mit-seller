@@ -133,7 +133,7 @@ def trial(r):
     r.step("trial again (limit)", msg(U4, r_text(r, "text_usertest")))
     r.step("admin raises limit", cb(ADMIN, "limitusertest_" + U4))
     r.step("limit value", msg(ADMIN, "2"))
-    r.step("trial on Nexra (choice)", cb(U4, "locationtests_2"))
+    r.step("trial on Mit (choice)", cb(U4, "locationtests_2"))
     r.step("choose random", cb(U4, "usernamechoice_random_test"),
            expect_diff=None)
     r.step("trial #3 (limit)", msg(U4, r_text(r, "text_usertest")))
@@ -251,14 +251,14 @@ def autopay(r):
 U5, U6, U7 = "7000000005", "7000000006", "7000000007"
 
 
-def nexra(r):
-    # paid purchase on the Nexra panel with a plain random username
-    r.sql_both("UPDATE marzban_panel SET MethodUsername = '%s' WHERE name_panel = 'NexraDE'" % T("users.customidAndRandom"))
+def mit(r):
+    # paid purchase on the Mit panel with a plain random username
+    r.sql_both("UPDATE marzban_panel SET MethodUsername = '%s' WHERE name_panel = 'MitDE'" % T("users.customidAndRandom"))
     r.sql_both("UPDATE setting SET statuscategory = '0'")
     r.step("U5 start", msg(U5, "/start", username="nima"))
     r.sql_both("UPDATE user SET Balance = 500000 WHERE id = '%s'" % U5)
     r.step("buy", msg(U5, r_text(r, "text_sell"), username="nima"))
-    r.step("Nexra panel", cb(U5, "location_2", username="nima"))
+    r.step("Mit panel", cb(U5, "location_2", username="nima"))
     r.step("product", cb(U5, "prodcutservice_aa03", username="nima"))
     r.step("pay", cb(U5, "confirmandgetservice", username="nima"))
     # "days left" is floor(diff/86400)+1: shown in the creation second it reads 31,
@@ -271,20 +271,20 @@ def nexra(r):
     r.step("extend list 2", lambda side: cb(U5, "extend_" + last_service(r, side, U5), username="nima"))
     r.step("extend pick 2", cb(U5, "serviceextendselect_aa03", username="nima"))
     http_fail(1)
-    r.step("extend refused by Nexra", cb(U5, "confirmserivce-aa03", username="nima"),
-           expect_diff="Nexra refused the renewal: PHP kept the customer's money and said it was renewed, Go refunds it and tells the admins",
+    r.step("extend refused by Mit", cb(U5, "confirmserivce-aa03", username="nima"),
+           expect_diff="Mit refused the renewal: PHP kept the customer's money and said it was renewed, Go refunds it and tells the admins",
            reconcile=["UPDATE user SET Balance = 340000 WHERE id = '%s'" % U5])
     r.step("extra volume", lambda side: cb(U5, "Extra_volume_" + last_service(r, side, U5), username="nima"))
     r.step("extra 3 GB", msg(U5, "3", username="nima"))
     http_fail(1)
-    r.step("extra refused by Nexra", cb(U5, "confirmaextra_3", text="فاکتور", username="nima"))
+    r.step("extra refused by Mit", cb(U5, "confirmaextra_3", text="فاکتور", username="nima"))
     r.step("change link (unsupported)", lambda side: cb(U5, "confirmchange_" + last_service(r, side, U5), username="nima"))
-    r.step("admin opens Nexra panel", msg(ADMIN, T("Admin.keyboardadmin.manage_panel")))
+    r.step("admin opens Mit panel", msg(ADMIN, T("Admin.keyboardadmin.manage_panel")))
     r.step("secret", msg(ADMIN, SECRET))
-    r.step("pick", msg(ADMIN, "NexraDE"))
+    r.step("pick", msg(ADMIN, "MitDE"))
     r.step("connection", msg(ADMIN, T("Admin.managepanel.btnshowconnect")))
-    r.step("edit creds menu", msg(ADMIN, T("Admin.managepanel.keyboardpanel.editnexracreds")))
-    r.step("edit nexra password", cb(ADMIN, "editnexracred_password_panel"))
+    r.step("edit creds menu", msg(ADMIN, T("Admin.managepanel.keyboardpanel.editmitcreds")))
+    r.step("edit mit password", cb(ADMIN, "editmitcred_password_panel"))
     r.step("new password", msg(ADMIN, "pass2"),
            expect_diff="Go also drops the cached tokens of the old credentials", reconcile=["UPDATE marzban_panel SET datelogin = NULL"])
     r.step("user removes inactive service", lambda side: cb(U5, "removebyuser-" + last_service(r, side, U5), username="nima"))
@@ -322,7 +322,7 @@ def gates(r):
     A = ADMIN
     r.step("set channel", msg(A, T("Admin.channel.setting")))
     r.step("change channel", msg(A, T("Admin.channel.changechannelbtn")))
-    r.step("channel name", msg(A, "nexrachannel"))
+    r.step("channel name", msg(A, "mitchannel"))
     r.step("user with channel (member)", msg(U1, "/start", username="ali"))
     r.step("rules on", cb(A, "editstsuts-roll_Status-0"), expect_diff="auto-confirm row (see above)")
     r.step("user sees rules", msg(U7, "/start"))
@@ -386,7 +386,7 @@ def admin2(r):
     r.step("pick Germany", msg(A, "Germany"))
     r.step("method menu", msg(A, T("Admin.managepanel.methodusername")))
     r.step("custom text + random", msg(A, T("users.customtextandrandom")))
-    r.step("custom name", msg(A, "nexra"))
+    r.step("custom name", msg(A, "mit"))
     r.step("sub link status", msg(A, T("Admin.managepanel.sublinkstatus")))
     r.step("sub link off", cb(A, "onsublink"))
     r.step("config status", msg(A, T("Admin.managepanel.configstatus")))
@@ -414,4 +414,4 @@ def admin2(r):
 
 
 
-ORDER = ["basics", "buy_after_card", "wallet", "trial", "admin", "autopay", "nexra", "referral", "gates", "admin2"]
+ORDER = ["basics", "buy_after_card", "wallet", "trial", "admin", "autopay", "mit", "referral", "gates", "admin2"]

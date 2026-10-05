@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/bot"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/bot"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 func (a *API) listPayments(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +46,7 @@ func (a *API) listPayments(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) approvePayment(w http.ResponseWriter, r *http.Request) {
 	order := r.PathValue("order")
-	if !a.B.ApprovePayment(order, nil, "nexra-panel", nil) {
+	if !a.B.ApprovePayment(order, nil, "mit-panel", nil) {
 		fail(w, 409, "this payment was already reviewed or does not exist")
 		return
 	}

@@ -3,8 +3,8 @@ package bot
 import (
 	"strings"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/php"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
 func (c *Ctx) invoiceTag() string {
@@ -185,7 +185,7 @@ func (c *Ctx) secPayConfirm() bool {
 		}
 		order := randHex(5)
 		c.insertPayment(order, "cart to cart", "waiting")
-		// kept so the receipt can be shown in Nexra Panel's payment review
+		// kept so the receipt can be shown in Mit Panel's payment review
 		c.db().SetKV("receipt_"+order, c.photoID)
 		if open := c.b.AutopayOpenOrder(c.fromID); open != nil && open.I("amount") == php.Intval(c.user.S("Processing_value")) {
 			c.b.AutopayAttach(open.S("id"), order)

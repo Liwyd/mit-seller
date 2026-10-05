@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/bot"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/bot"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 func (a *API) routes() {

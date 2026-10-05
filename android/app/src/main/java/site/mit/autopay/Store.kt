@@ -1,4 +1,4 @@
-package site.nexra.autopay
+package site.mit.autopay
 
 import android.content.ContentValues
 import android.content.Context

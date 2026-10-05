@@ -4,9 +4,10 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/panels"
+	"github.com/Liwyd/mit-seller/internal/php"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
 // secServices covers "Purchased services" through the cancel-service request.
@@ -203,7 +204,7 @@ func renewConfig(panelType, inboundID string, product db.Row) (map[string]any, b
 	}
 	dataLimit := float64(php.Intval(product.S("Volume_constraint"))) * math.Pow(1024, 3)
 	switch panelType {
-	case "marzban", "nexra":
+	case "marzban", "mit", "nexra":
 		return map[string]any{"expire": newDate, "data_limit": int64(dataLimit)}, true
 	case "marzneshin":
 		return map[string]any{"expire_date": newDate, "data_limit": int64(dataLimit)}, true
@@ -407,8 +408,8 @@ func (c *Ctx) confirmRenew(code string) bool {
 	typ := panel.S("type")
 	if cfg, ok := renewConfig(typ, panel.S("inboundid"), p); ok {
 		res := pm.Modifyuser(pv, inv.S("Service_location"), cfg)
-		if typ == "nexra" && res.Isset("detail") {
-			// Nexra refused (usually: the reseller is out of traffic). The
+		if panels.IsMitType(typ) && res.Isset("detail") {
+			// The Mit panel refused (usually: the reseller is out of traffic). The
 			// PHP bot kept the money anyway; give it back and tell the admins.
 			c.setUser("Balance", c.user.S("Balance"))
 			c.sendHTML(c.fromID, T("users.extend.ErrorExtend"), c.kbMain())
@@ -492,7 +493,7 @@ func (c *Ctx) confirmExtraVolume(volumeS string) bool {
 	dataLimit := out.F("data_limit") + volume*gib
 	var cfg map[string]any
 	switch panel.S("type") {
-	case "marzban", "nexra", "marzneshin":
+	case "marzban", "mit", "nexra", "marzneshin":
 		cfg = map[string]any{"data_limit": jsonNum(dataLimit)}
 	case "x-ui_single", "alireza":
 		s, _ := json.Marshal(map[string]any{"clients": []any{map[string]any{"totalGB": jsonNum(dataLimit)}}})
@@ -523,7 +524,7 @@ func (c *Ctx) confirmExtraVolume(volumeS string) bool {
 		pm.WGSetJob(inv.S("Service_location"), "total_data", php.FloatToString(gb), id)
 	}
 	res := pm.Modifyuser(inv.S("username"), panel.S("name_panel"), cfg)
-	if panel.S("type") == "nexra" && res.Isset("detail") {
+	if panels.IsMitType(panel.S("type")) && res.Isset("detail") {
 		if priced {
 			c.setUser("Balance", c.user.S("Balance"))
 		}

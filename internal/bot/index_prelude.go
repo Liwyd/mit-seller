@@ -4,9 +4,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/php"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
 // run is index.php followed by admin.php (a `return` in index.php skipped
@@ -78,7 +78,7 @@ func (c *Ctx) prelude() bool {
 	fromInt := php.Intval(c.fromID)
 
 	// keyboard.php read the user's step before anything changed it
-	c.usersStep = d.Select("user", "step", "id", c.fromID).S("step")
+	c.usersStep = normStep(d.Select("user", "step", "id", c.fromID).S("step"))
 
 	if fromInt != 0 && !d.Exists("user", "id", c.fromID) {
 		resp := ik(row(cb(T("Admin.ManageUser.sendmessageUser"), "Response_"+c.fromID)))
@@ -111,6 +111,9 @@ func (c *Ctx) prelude() bool {
 	c.user = d.Select("user", "*", "id", c.fromID)
 	if c.user == nil {
 		c.user = db.Row{}
+	}
+	if _, ok := c.user["step"]; ok {
+		c.user.Set("step", normStep(c.user.S("step")))
 	}
 	if (php.LooseEq(c.setting.S("status_verify"), "1") && php.Intval(c.user.S("verify")) == 0) && !c.isAdmin {
 		c.send(c.fromID, T("users.VerifyUser"), nil, "html")

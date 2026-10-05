@@ -3,8 +3,8 @@ package panels
 import (
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 // Alireza0's x-ui fork: same idea as 3x-ui under /xui/API, with a fresh login

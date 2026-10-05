@@ -12,16 +12,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/config"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/panels"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/text"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/config"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/panels"
+	"github.com/Liwyd/mit-seller/internal/php"
+	"github.com/Liwyd/mit-seller/internal/text"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
 // Version is shown on the admin login message ($version in PHP).
-var Version = "6.0.5-go"
+var Version = "7.0.0-go"
 
 type Bot struct {
 	Cfg *config.Config
@@ -202,14 +202,22 @@ func (c *Ctx) report(txt string) {
 	}
 }
 
-// match is preg_match($re, $datain, $dataget) on callback data.
+// match is preg_match($re, $datain, $dataget) on callback data. Callback data
+// written before the rebrand is retried under its current spelling, so a
+// button on an old message still works; the data as it arrived is always
+// tried first, so a value the admin typed is never rewritten.
 func (c *Ctx) match(re *regexp.Regexp) bool {
-	m := re.FindStringSubmatch(c.datain)
-	if m == nil {
-		return false
+	if m := re.FindStringSubmatch(c.datain); m != nil {
+		c.dataget = m
+		return true
 	}
-	c.dataget = m
-	return true
+	if alt := preRebrand(c.datain); alt != c.datain {
+		if m := re.FindStringSubmatch(alt); m != nil {
+			c.dataget = m
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Ctx) g(i int) string {

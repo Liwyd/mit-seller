@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
 // Telegram Premium custom emoji support.
@@ -119,7 +119,7 @@ func (c *Ctx) emojiIDReply() {
 		ids = append(ids, e.CustomEmojiID)
 		b.WriteString(`<tg-emoji emoji-id="` + e.CustomEmojiID + `">⭐️</tg-emoji> <code>` + e.CustomEmojiID + "</code>\n")
 	}
-	// the packs they come from: Nexra Panel allows emoji by pack
+	// the packs they come from: Mit Panel allows emoji by pack
 	var packs []string
 	if st, err := c.b.TG.GetCustomEmojiStickers(ids); err == nil {
 		got := map[string]bool{}
@@ -136,7 +136,7 @@ func (c *Ctx) emojiIDReply() {
 			b.WriteString("https://t.me/addemoji/" + html.EscapeString(p) + "\n")
 		}
 	}
-	b.WriteString("\nبرای مجازکردن در Nexra Panel: ربات ← «پک‌های ایموجی پریمیوم»، لینک پک یا همین پیام را بگذارید و «افزودن» را بزنید. " +
+	b.WriteString("\nبرای مجازکردن در Mit Panel: ربات ← «پک‌های ایموجی پریمیوم»، لینک پک یا همین پیام را بگذارید و «افزودن» را بزنید. " +
 		"بعد این ایموجی‌ها در «دکمه‌ها» (آیکون دکمه) و در متن‌ها قابل استفاده‌اند.")
 	c.sendHTML(c.fromID, b.String(), kbAdmin())
 	c.step("home")

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/panels"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/panels"
+	"github.com/Liwyd/mit-seller/internal/php"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
 // jmap is a decoded JSON object with PHP-ish accessors.

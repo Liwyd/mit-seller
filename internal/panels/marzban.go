@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
+	"github.com/Liwyd/mit-seller/internal/db"
 )
 
 // MarzbanToken is token_panel(): a cached bearer token or the login response

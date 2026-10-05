@@ -2,7 +2,7 @@
 ini_set('error_log', 'error_log');
 require_once 'config.php';
 require_once 'marzban.php';
-require_once 'nexrapanel.php';
+require_once 'mitpanel.php';
 require_once 'x-ui_single.php';
 require_once 'marzneshin.php';
 require_once 'alireza_single.php';
@@ -149,8 +149,8 @@ class ManagePanel
                 $Output['configs'] = [];
             }
 
-        } elseif ($Get_Data_Panel['type'] == "nexra") {
-            $data_Output = adduser_nexra($usernameC, $expire, $data_limit, $Get_Data_Panel['name_panel'], $is_test);
+        } elseif ($Get_Data_Panel['type'] == "mit") {
+            $data_Output = adduser_mit($usernameC, $expire, $data_limit, $Get_Data_Panel['name_panel'], $is_test);
             if (isset($data_Output['detail']) && $data_Output['detail']) {
                 $Output['status'] = 'Unsuccessful';
                 $Output['msg'] = $data_Output['detail'];
@@ -426,8 +426,8 @@ class ManagePanel
                 'links' => [],
                 'subscription_url' => $UsernameData['password'],
             );
-        } elseif ($Get_Data_Panel['type'] == "nexra") {
-            $u = getuser_nexra($username, $Get_Data_Panel['name_panel']);
+        } elseif ($Get_Data_Panel['type'] == "mit") {
+            $u = getuser_mit($username, $Get_Data_Panel['name_panel']);
             if (isset($u['detail'])) {
                 return array(
                     'status' => 'Unsuccessful',
@@ -655,8 +655,8 @@ class ManagePanel
                     'subscription_url' => $url_sub,
                 );
             }
-        } elseif ($Get_Data_Panel['type'] == "nexra") {
-            $revoke_sub = revoke_sub_nexra($username, $name_panel);
+        } elseif ($Get_Data_Panel['type'] == "mit") {
+            $revoke_sub = revoke_sub_mit($username, $name_panel);
             $Output = array(
                 'status' => 'Unsuccessful',
                 'msg' => $revoke_sub['detail']
@@ -754,8 +754,8 @@ class ManagePanel
                     'username' => $username,
                 );
             }
-        } elseif ($Get_Data_Panel['type'] == "nexra") {
-            $UsernameData = removeuser_nexra($Get_Data_Panel['name_panel'], $username);
+        } elseif ($Get_Data_Panel['type'] == "mit") {
+            $UsernameData = removeuser_mit($Get_Data_Panel['name_panel'], $username);
             if (isset($UsernameData['detail']) && $UsernameData['detail']) {
                 $Output = array(
                     'status' => 'Unsuccessful',
@@ -794,8 +794,8 @@ class ManagePanel
             allowAccessPeers($name_panel, $username);
             $datauser = get_userwg($username, $name_panel);
             ResetUserDataUsagewg($datauser['id'], $name_panel);
-        } elseif ($Get_Data_Panel['type'] == "nexra") {
-            ResetUserDataUsage_nexra($username, $name_panel);
+        } elseif ($Get_Data_Panel['type'] == "mit") {
+            ResetUserDataUsage_mit($username, $name_panel);
         }
     }
     function Modifyuser($username, $name_panel, $config = array())
@@ -900,8 +900,8 @@ class ManagePanel
             );
             $configs = array_merge($configs, $config);
             return updatepear($Get_Data_Panel['name_panel'], $configs);
-        } elseif ($Get_Data_Panel['type'] == "nexra") {
-            return Modifyuser_nexra($name_panel, $username, $config);
+        } elseif ($Get_Data_Panel['type'] == "mit") {
+            return Modifyuser_mit($name_panel, $username, $config);
         }
 
     }

@@ -6,8 +6,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/panels"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/panels"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 // formatBytes is functions.php formatBytes() (log-based, PHP float output).

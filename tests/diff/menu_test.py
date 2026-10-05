@@ -13,8 +13,8 @@ import urllib.error
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-WORK = os.environ.get("DIFF_WORK", "/tmp/nexrabot-diff")
-BIN = os.environ.get("NEXRABOT", "/tmp/nexrabot")
+WORK = os.environ.get("DIFF_WORK", "/tmp/mitseller-diff")
+BIN = os.environ.get("MITSELLER", "/tmp/mitseller")
 BOT = "http://127.0.0.1:9102"
 MOCK = "http://127.0.0.1:9202"
 TOKEN = "222:GO"
@@ -148,7 +148,7 @@ def run():
     check("unknown emoji 404", code == 404, code)
     code, b = api("GET", "/emoji/abc")
     check("bad emoji id 400", code == 400, code)
-    code, b = api("GET", "/emoji-pack/NexraPack")
+    code, b = api("GET", "/emoji-pack/MitPack")
     check("emoji pack", code == 200 and len(b["data"]["emojis"]) == 2 and b["data"]["emojis"][0]["id"] == "5368324170671202286", b)
     code, b = api("GET", "/emoji-pack/" + urllib.request.quote("https:", safe="") + "nope")
     code, b = api("GET", "/emoji-pack/missing")

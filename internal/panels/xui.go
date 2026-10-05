@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 func randHex(n int) string {

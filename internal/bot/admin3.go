@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/panels"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/panels"
+	"github.com/Liwyd/mit-seller/internal/php"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
 // Panel management stays behind the secret code. index/admin.php only
@@ -29,7 +29,7 @@ func (c *Ctx) requireUnlock() bool {
 		return true
 	}
 	c.sendHTML(c.fromID, secretPrompt, kbBackAdmin())
-	c.step("nexra_panel_access_gate_manage")
+	c.step("mit_panel_access_gate_manage")
 	return false
 }
 
@@ -49,8 +49,8 @@ func (c *Ctx) admManagePanel() bool {
 	switch {
 	case c.text == T("Admin.keyboardadmin.manage_panel"):
 		c.sendHTML(c.fromID, secretPrompt, kbBackAdmin())
-		c.step("nexra_panel_access_gate_manage")
-	case c.stepIs("nexra_panel_access_gate_manage"):
+		c.step("mit_panel_access_gate_manage")
+	case c.stepIs("mit_panel_access_gate_manage"):
 		if !c.secretOK() {
 			c.sendHTML(c.fromID, "❌ کد اشتباه است.", kbAdmin())
 			c.step("home")
@@ -112,31 +112,31 @@ func (c *Ctx) admManagePanel() bool {
 		c.outTypePanel(c.panelRow().S("type"), T("Admin.managepanel.ChangedpasswordPanel"))
 		c.upd("marzban_panel", "password_panel", c.text, "name_panel", pv)
 		c.step("home")
-	case c.text == mpk("editnexracreds"):
+	case c.text == mpk("editmitcreds"):
 		if !c.requireUnlock() {
 			return true
 		}
 		k := ik(
-			row(cb("🔗 آدرس Nexra", "editnexracred_url_panel")),
-			row(cb("👤 یوزرنیم Nexra", "editnexracred_username_panel")),
-			row(cb("🔐 پسورد Nexra", "editnexracred_password_panel")),
-			row(cb("🔗 آدرس واقعیِ مرزبان", "editnexracred_marzban_url_direct")),
-			row(cb("👤 یوزرنیمِ واقعیِ مرزبان", "editnexracred_marzban_username_direct")),
-			row(cb("🔐 پسوردِ واقعیِ مرزبان", "editnexracred_marzban_password_direct")),
+			row(cb("🔗 آدرس Mit", "editmitcred_url_panel")),
+			row(cb("👤 یوزرنیم Mit", "editmitcred_username_panel")),
+			row(cb("🔐 پسورد Mit", "editmitcred_password_panel")),
+			row(cb("🔗 آدرس واقعیِ مرزبان", "editmitcred_marzban_url_direct")),
+			row(cb("👤 یوزرنیمِ واقعیِ مرزبان", "editmitcred_marzban_username_direct")),
+			row(cb("🔐 پسوردِ واقعیِ مرزبان", "editmitcred_marzban_password_direct")),
 		)
 		c.sendHTML(c.fromID, "کدام مورد را می‌خواهید ویرایش کنید؟", k)
-	case c.m(`editnexracred_(.*)`):
+	case c.m(`editmitcred_(.*)`):
 		field := c.g(1)
-		if !nexraField(field) || !c.requireUnlock() {
+		if !mitField(field) || !c.requireUnlock() {
 			return true
 		}
 		c.setUser("Processing_value_one", field)
 		c.del()
 		c.sendHTML(c.fromID, "مقدار جدید را ارسال کنید:", kbBackAdmin())
-		c.step("nexra_editfield_value")
-	case c.stepIs("nexra_editfield_value"):
+		c.step("mit_editfield_value")
+	case c.stepIs("mit_editfield_value"):
 		field := c.user.S("Processing_value_one")
-		if !nexraField(field) {
+		if !mitField(field) {
 			c.step("home")
 			return true
 		}
@@ -205,7 +205,7 @@ func (c *Ctx) admManagePanel() bool {
 	return false
 }
 
-func nexraField(f string) bool {
+func mitField(f string) bool {
 	switch f {
 	case "url_panel", "username_panel", "password_panel", "marzban_url_direct", "marzban_username_direct", "marzban_password_direct":
 		return true
@@ -778,8 +778,8 @@ func (c *Ctx) setInbounds() bool {
 	pm := c.b.PM
 	pv := c.user.S("Processing_value")
 	p := c.panelRow()
-	if p.S("type") == "nexra" {
-		c.sendHTML(c.fromID, "این تنظیم برای پنل Nexra لازم نیست - اینباند و پروکسی هر ادمین از داشبورد خودِ Nexra Panel مدیریت می‌شود.", kbBackAdmin())
+	if panels.IsMitType(p.S("type")) {
+		c.sendHTML(c.fromID, "این تنظیم برای پنل Mit لازم نیست - اینباند و پروکسی هر ادمین از داشبورد خودِ Mit Panel مدیریت می‌شود.", kbBackAdmin())
 		c.step("home")
 		return true
 	}

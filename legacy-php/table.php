@@ -646,27 +646,27 @@ try {
     file_put_contents('error_log',$e->getMessage());
 }
 $connect->query("ALTER TABLE `user` CHANGE `Processing_value` `Processing_value` TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL;");
-//----------------------- [ Nexra: guaranteed columns ] --------------------- //
+//----------------------- [ Mit: guaranteed columns ] --------------------- //
 // These run on every visit, whatever happened above, so a panel can always be
 // saved. Each column is attempted on its own and a failure never stops the rest.
-$nexra_columns = array(
+$mit_columns = array(
     'marzban_url_direct' => 'VARCHAR(500) NULL',
     'marzban_username_direct' => 'VARCHAR(200) NULL',
     'marzban_password_direct' => 'VARCHAR(200) NULL',
 );
-foreach ($nexra_columns as $nexra_column => $nexra_type) {
+foreach ($mit_columns as $mit_column => $mit_type) {
     try {
-        $has = $connect->query("SHOW COLUMNS FROM marzban_panel LIKE '$nexra_column'");
+        $has = $connect->query("SHOW COLUMNS FROM marzban_panel LIKE '$mit_column'");
         if ($has && mysqli_num_rows($has) == 1) {
             continue;
         }
-        if ($connect->query("ALTER TABLE marzban_panel ADD $nexra_column $nexra_type")) {
-            echo "The $nexra_column field was added ✅<br>";
+        if ($connect->query("ALTER TABLE marzban_panel ADD $mit_column $mit_type")) {
+            echo "The $mit_column field was added ✅<br>";
         } else {
-            echo "Could not add $nexra_column: " . mysqli_error($connect) . "<br>";
+            echo "Could not add $mit_column: " . mysqli_error($connect) . "<br>";
         }
     } catch (Exception $e) {
-        echo "Could not add $nexra_column: " . $e->getMessage() . "<br>";
+        echo "Could not add $mit_column: " . $e->getMessage() . "<br>";
     }
 }
 

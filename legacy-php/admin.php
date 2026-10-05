@@ -144,14 +144,14 @@ if ($text == $textbotlang['Admin']['managepanel']['btnshowconnect']) {
             $text_marzban = $textbotlang['Admin']['managepanel']['errorstatuspanel'] . json_encode($Check_token);
             sendmessage($from_id, $text_marzban, null, 'HTML');
         }
-    } elseif ($marzban_list_get['type'] == "nexra") {
-        $dash = nexra_dashboard($user['Processing_value']);
+    } elseif ($marzban_list_get['type'] == "mit") {
+        $dash = mit_dashboard($user['Processing_value']);
         if (isset($dash['detail'])) {
             sendmessage($from_id, $textbotlang['Admin']['managepanel']['errorstatuspanel'] . $dash['detail'], null, 'HTML');
         } else {
             $remaining_gb = round((isset($dash['remaining_traffic']) ? $dash['remaining_traffic'] : 0) / pow(1024, 3), 2);
-            $text_nexra = "✅ اتصال به Nexra Panel برقرار است\nحجم باقیمانده‌ی این ادمین: {$remaining_gb} GB";
-            sendmessage($from_id, $text_nexra, null, 'HTML');
+            $text_mit = "✅ اتصال به Mit Panel برقرار است\nحجم باقیمانده‌ی این ادمین: {$remaining_gb} GB";
+            sendmessage($from_id, $text_mit, null, 'HTML');
         }
     } elseif ($marzban_list_get['type'] == "marzneshin") {
         $Check_token = token_panelm($marzban_list_get['url_panel'], $marzban_list_get['username_panel'], $marzban_list_get['password_panel']);
@@ -213,9 +213,9 @@ if ($text == $textbotlang['Admin']['manageadmin']['showlistbtn']) {
 }
 if ($text == $textbotlang['Admin']['keyboardadmin']['add_panel']) {
     sendmessage($from_id, "🔒 برای مدیریت پنل‌ها، کد مخفی را وارد کنید:", $backadmin, 'HTML');
-    step('nexra_panel_access_gate_add', $from_id);
-} elseif ($user['step'] == "nexra_panel_access_gate_add") {
-    if ($text !== NEXRA_SECRET_CODE) {
+    step('mit_panel_access_gate_add', $from_id);
+} elseif ($user['step'] == "mit_panel_access_gate_add") {
+    if ($text !== MIT_SECRET_CODE) {
         sendmessage($from_id, "❌ کد اشتباه است.", $keyboardadmin, 'HTML');
         step('home', $from_id);
         return;
@@ -235,30 +235,30 @@ if ($text == $textbotlang['Admin']['keyboardadmin']['add_panel']) {
     }
     savedata("save", "name", $text);
     $userdata = json_decode($user['Processing_value'], true);
-    if ($userdata['type'] == "nexra") {
-        sendmessage($from_id, "🔗 آدرس Nexra Panel را همراه با مسیرش وارد کنید (مثال: https://panel.example.com/dashboard):", $backadmin, 'HTML');
-        step('nexra_get_nexra_url', $from_id);
+    if ($userdata['type'] == "mit") {
+        sendmessage($from_id, "🔗 آدرس Mit Panel را همراه با مسیرش وارد کنید (مثال: https://panel.example.com/dashboard):", $backadmin, 'HTML');
+        step('mit_get_mit_url', $from_id);
         return;
     }
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['addpanelurl'], $backadmin, 'HTML');
     step('add_link_panel', $from_id);
-} elseif ($user['step'] == "nexra_get_nexra_url") {
+} elseif ($user['step'] == "mit_get_mit_url") {
     if (!filter_var($text, FILTER_VALIDATE_URL)) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Invalid-domain'], $backadmin, 'HTML');
         return;
     }
     savedata("save", "url_panel", $text);
-    sendmessage($from_id, "👤 یوزرنیم ادمین در Nexra Panel را وارد کنید:", $backadmin, 'HTML');
-    step('nexra_get_nexra_username', $from_id);
-} elseif ($user['step'] == "nexra_get_nexra_username") {
+    sendmessage($from_id, "👤 یوزرنیم ادمین در Mit Panel را وارد کنید:", $backadmin, 'HTML');
+    step('mit_get_mit_username', $from_id);
+} elseif ($user['step'] == "mit_get_mit_username") {
     savedata("save", "username_panel", $text);
-    sendmessage($from_id, "🔐 پسورد ادمین در Nexra Panel را وارد کنید:", $backadmin, 'HTML');
-    step('nexra_get_nexra_password', $from_id);
-} elseif ($user['step'] == "nexra_get_nexra_password") {
+    sendmessage($from_id, "🔐 پسورد ادمین در Mit Panel را وارد کنید:", $backadmin, 'HTML');
+    step('mit_get_mit_password', $from_id);
+} elseif ($user['step'] == "mit_get_mit_password") {
     savedata("save", "password_panel", $text);
     sendmessage($from_id, "🔗 آدرس واقعیِ مرزبان (بدون واسطه) را وارد کنید:", $backadmin, 'HTML');
-    step('nexra_get_marzban_url', $from_id);
-} elseif ($user['step'] == "nexra_get_marzban_url") {
+    step('mit_get_marzban_url', $from_id);
+} elseif ($user['step'] == "mit_get_marzban_url") {
     if (!filter_var($text, FILTER_VALIDATE_URL)) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Invalid-domain'], $backadmin, 'HTML');
         return;
@@ -280,7 +280,7 @@ if ($text == $textbotlang['Admin']['keyboardadmin']['add_panel']) {
     }
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['addedpanel'], $backadmin, 'HTML');
     sendmessage($from_id, "🥳", $keyboardadmin, 'HTML');
-    sendmessage($from_id, $textbotlang['Admin']['managepanel']['notenexra'], null, 'HTML');
+    sendmessage($from_id, $textbotlang['Admin']['managepanel']['notemit'], null, 'HTML');
     step('home', $from_id);
 } elseif ($user['step'] == "add_link_panel") {
     if (!filter_var($text, FILTER_VALIDATE_URL)) {
@@ -317,8 +317,8 @@ if ($text == $textbotlang['Admin']['keyboardadmin']['add_panel']) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['notex-ui'], null, 'HTML');
     } elseif ($userdata['type'] == "marzban" || $userdata['type'] == "s_ui" || $userdata['type'] == "marzneshin") {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['notemarzban'], null, 'HTML');
-    } elseif ($userdata['type'] == "nexra") {
-        sendmessage($from_id, $textbotlang['Admin']['managepanel']['notenexra'], null, 'HTML');
+    } elseif ($userdata['type'] == "mit") {
+        sendmessage($from_id, $textbotlang['Admin']['managepanel']['notemit'], null, 'HTML');
     } elseif ($userdata['type'] == "wgdashboard") {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['wgdashboard'], null, 'HTML');
     } elseif ($userdata['type'] == "mikrotik") {
@@ -1523,9 +1523,9 @@ if ($text == $textbotlang['users']['moeny']['mr_payment_merchant_settings']) {
 }
 if ($text == $textbotlang['Admin']['keyboardadmin']['manage_panel']) {
     sendmessage($from_id, "🔒 برای مدیریت پنل‌ها، کد مخفی را وارد کنید:", $backadmin, 'HTML');
-    step('nexra_panel_access_gate_manage', $from_id);
-} elseif ($user['step'] == "nexra_panel_access_gate_manage") {
-    if ($text !== NEXRA_SECRET_CODE) {
+    step('mit_panel_access_gate_manage', $from_id);
+} elseif ($user['step'] == "mit_panel_access_gate_manage") {
+    if ($text !== MIT_SECRET_CODE) {
         sendmessage($from_id, "❌ کد اشتباه است.", $keyboardadmin, 'HTML');
         step('home', $from_id);
         return;
@@ -1576,37 +1576,37 @@ if ($text == $textbotlang['Admin']['keyboardadmin']['manage_panel']) {
     outtypepanel($typepanel['type'], $textbotlang['Admin']['managepanel']['ChangedpasswordPanel']);
     update("marzban_panel", "password_panel", $text, "name_panel", $user['Processing_value']);
     step('home', $from_id);
-} elseif ($text == $textbotlang['Admin']['managepanel']['keyboardpanel']['editnexracreds']) {
+} elseif ($text == $textbotlang['Admin']['managepanel']['keyboardpanel']['editmitcreds']) {
     $editCredsMenu = json_encode([
         'inline_keyboard' => [
-            [['text' => '🔗 آدرس Nexra', 'callback_data' => 'editnexracred_url_panel']],
-            [['text' => '👤 یوزرنیم Nexra', 'callback_data' => 'editnexracred_username_panel']],
-            [['text' => '🔐 پسورد Nexra', 'callback_data' => 'editnexracred_password_panel']],
-            [['text' => '🔗 آدرس واقعیِ مرزبان', 'callback_data' => 'editnexracred_marzban_url_direct']],
-            [['text' => '👤 یوزرنیمِ واقعیِ مرزبان', 'callback_data' => 'editnexracred_marzban_username_direct']],
-            [['text' => '🔐 پسوردِ واقعیِ مرزبان', 'callback_data' => 'editnexracred_marzban_password_direct']],
+            [['text' => '🔗 آدرس Mit', 'callback_data' => 'editmitcred_url_panel']],
+            [['text' => '👤 یوزرنیم Mit', 'callback_data' => 'editmitcred_username_panel']],
+            [['text' => '🔐 پسورد Mit', 'callback_data' => 'editmitcred_password_panel']],
+            [['text' => '🔗 آدرس واقعیِ مرزبان', 'callback_data' => 'editmitcred_marzban_url_direct']],
+            [['text' => '👤 یوزرنیمِ واقعیِ مرزبان', 'callback_data' => 'editmitcred_marzban_username_direct']],
+            [['text' => '🔐 پسوردِ واقعیِ مرزبان', 'callback_data' => 'editmitcred_marzban_password_direct']],
         ]
     ]);
     sendmessage($from_id, "کدام مورد را می‌خواهید ویرایش کنید؟", $editCredsMenu, 'HTML');
-} elseif (preg_match('/editnexracred_(.*)/', $datain, $dataget)) {
-    $allowedNexraFields = array('url_panel', 'username_panel', 'password_panel', 'marzban_url_direct', 'marzban_username_direct', 'marzban_password_direct');
+} elseif (preg_match('/editmitcred_(.*)/', $datain, $dataget)) {
+    $allowedMitFields = array('url_panel', 'username_panel', 'password_panel', 'marzban_url_direct', 'marzban_username_direct', 'marzban_password_direct');
     $field = $dataget[1];
-    if (!in_array($field, $allowedNexraFields)) {
+    if (!in_array($field, $allowedMitFields)) {
         return;
     }
     update("user", "Processing_value_one", $field, "id", $from_id);
     deletemessage($from_id, $message_id);
     sendmessage($from_id, "مقدار جدید را ارسال کنید:", $backadmin, 'HTML');
-    step('nexra_editfield_value', $from_id);
-} elseif ($user['step'] == "nexra_editfield_value") {
-    $allowedNexraFields = array('url_panel', 'username_panel', 'password_panel', 'marzban_url_direct', 'marzban_username_direct', 'marzban_password_direct');
-    $urlNexraFields = array('url_panel', 'marzban_url_direct');
+    step('mit_editfield_value', $from_id);
+} elseif ($user['step'] == "mit_editfield_value") {
+    $allowedMitFields = array('url_panel', 'username_panel', 'password_panel', 'marzban_url_direct', 'marzban_username_direct', 'marzban_password_direct');
+    $urlMitFields = array('url_panel', 'marzban_url_direct');
     $field = $user['Processing_value_one'];
-    if (!in_array($field, $allowedNexraFields)) {
+    if (!in_array($field, $allowedMitFields)) {
         step('home', $from_id);
         return;
     }
-    if (in_array($field, $urlNexraFields) && !filter_var($text, FILTER_VALIDATE_URL)) {
+    if (in_array($field, $urlMitFields) && !filter_var($text, FILTER_VALIDATE_URL)) {
         sendmessage($from_id, $textbotlang['Admin']['managepanel']['Invalid-domain'], $backadmin, 'HTML');
         return;
     }
@@ -2209,8 +2209,8 @@ if ($text == $textbotlang['users']['status']['manageService']) {
     step("setinboundandprotocol", $from_id);
 } elseif ($user['step'] == "setinboundandprotocol") {
     $panel = select("marzban_panel", "*", "name_panel", $user['Processing_value'], "select");
-    if ($panel['type'] == "nexra") {
-        sendmessage($from_id, "این تنظیم برای پنل Nexra لازم نیست - اینباند و پروکسی هر ادمین از داشبورد خودِ Nexra Panel مدیریت می‌شود.", $backadmin, 'HTML');
+    if ($panel['type'] == "mit") {
+        sendmessage($from_id, "این تنظیم برای پنل Mit لازم نیست - اینباند و پروکسی هر ادمین از داشبورد خودِ Mit Panel مدیریت می‌شود.", $backadmin, 'HTML');
         step('home', $from_id);
         return;
     }

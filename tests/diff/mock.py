@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake Telegram Bot API + Marzban + Nexra Panel for the PHP-vs-Go diff test.
+"""Fake Telegram Bot API + Marzban + Mit Panel for the PHP-vs-Go diff test.
 
 One process serves one "world": Telegram calls are logged per bot token and
 the panel state (users) lives in memory. Control endpoints:
@@ -21,7 +21,7 @@ CALLS = {}           # token -> [ {method, params} ]
 MSG_ID = [1000]
 USERS = {}           # marzban username -> dict
 FAIL = [0]
-NEXRA_TRAFFIC = [500 * 1024 ** 3]
+MIT_TRAFFIC = [500 * 1024 ** 3]
 
 
 def now():
@@ -141,12 +141,12 @@ class H(BaseHTTPRequestHandler):
         if m == "getcustomemojistickers":
             ids = params.get("custom_emoji_ids") or []
             return self.send(200, {"ok": True, "result": [
-                {"file_id": "sticker-" + i, "emoji": "⭐", "custom_emoji_id": i, "set_name": "NexraPack", "is_animated": True, "is_video": False,
+                {"file_id": "sticker-" + i, "emoji": "⭐", "custom_emoji_id": i, "set_name": "MitPack", "is_animated": True, "is_video": False,
                  "thumbnail": {"file_id": "thumb-" + i}} for i in ids if not i.startswith("404")]})
         if m == "getstickerset":
-            if params.get("name") != "NexraPack":
+            if params.get("name") != "MitPack":
                 return self.send(400, {"ok": False, "error_code": 400, "description": "Bad Request: STICKERSET_INVALID"})
-            return self.send(200, {"ok": True, "result": {"name": "NexraPack", "title": "Nexra", "sticker_type": "custom_emoji", "stickers": [
+            return self.send(200, {"ok": True, "result": {"name": "MitPack", "title": "Mit", "sticker_type": "custom_emoji", "stickers": [
                 {"file_id": "s1", "emoji": "🛒", "custom_emoji_id": "5368324170671202286", "is_animated": False, "is_video": False},
                 {"file_id": "s2", "emoji": "💎", "custom_emoji_id": "5368324170671202287", "is_animated": True, "is_video": False,
                  "thumbnail": {"file_id": "t2"}}]}})
@@ -211,13 +211,13 @@ class H(BaseHTTPRequestHandler):
         if p == "/api/groups":
             return self.send(200, {"groups": []})
 
-        # Nexra Panel (mounted under /dashboard in real life; any prefix works here)
+        # Mit Panel (mounted under /dashboard in real life; any prefix works here)
         if p.endswith("/login") and method == "POST":
             if data.get("password") == "wrong":
                 return self.send(401, {"success": False, "message": "Incorrect username or password"})
             return self.send(200, {"success": True, "data": {"access_token": "nx-" + data.get("username", "")}})
         if p.endswith("/dashboard"):
-            return self.send(200, {"success": True, "data": {"remaining_traffic": NEXRA_TRAFFIC[0]}})
+            return self.send(200, {"success": True, "data": {"remaining_traffic": MIT_TRAFFIC[0]}})
         if "/admin/user" in p:
             tail = p.split("/admin/user", 1)[1].strip("/")
             parts = [urllib.parse.unquote(x) for x in tail.split("/")] if tail else []

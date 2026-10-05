@@ -1,17 +1,17 @@
 name: Release
 
-# Push a tag like v6.0.0 (or publish a release) to build:
-#   nexrabot-linux-amd64 / nexrabot-linux-arm64  — the bot, used by install.sh
-#   nexra-autopay.apk                              — the auto-confirm phone app,
-#                                                    which Nexra Panel can fetch
+# Push a tag like v7.0.0 (or publish a release) to build:
+#   mitseller-linux-amd64 / mitseller-linux-arm64  — the bot, used by install.sh
+#   mit-autopay.apk                              — the auto-confirm phone app,
+#                                                    which Mit Panel can fetch
 #
 # Or run it by hand (Actions → Release → Run workflow) on any branch with a
-# tag: v6.0.0 publishes a release from that branch, v6.0.0-beta.1 a
-# pre-release (use it with RELEASE=v6.0.0-beta.1 bash install.sh …).
+# tag: v7.0.0 publishes a release from that branch, v7.0.0-beta.1 a
+# pre-release (use it with RELEASE=v7.0.0-beta.1 bash install.sh …).
 on:
   push:
     tags: ['v*']
-    # or: write a version (v6.0.0) into .github/RELEASE_VERSION on any branch
+    # or: write a version (v7.0.0) into .github/RELEASE_VERSION on any branch
     # and push — that publishes a release of that branch under that tag
     branches: ['**']
     paths: ['.github/RELEASE_VERSION']
@@ -22,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Pre-release tag to create, e.g. v6.0.0-beta.1 (empty = build only)'
+        description: 'Pre-release tag to create, e.g. v7.0.0-beta.1 (empty = build only)'
         required: false
         default: ''
 
@@ -41,7 +41,7 @@ jobs:
       - name: Build
         run: |
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o dist/nexrabot-linux-$arch ./cmd/nexrabot
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o dist/mitseller-linux-$arch ./cmd/mitseller
           done
       - uses: actions/upload-artifact@v4
         with:
@@ -62,7 +62,7 @@ jobs:
       - name: Build APK
         working-directory: android
         run: gradle assembleDebug --no-daemon --stacktrace
-      - run: mkdir -p dist && cp android/app/build/outputs/apk/debug/app-debug.apk dist/nexra-autopay.apk
+      - run: mkdir -p dist && cp android/app/build/outputs/apk/debug/app-debug.apk dist/mit-autopay.apk
       - uses: actions/upload-artifact@v4
         with:
           name: apk
@@ -92,12 +92,12 @@ jobs:
           merge-multiple: true
       - run: |
           cp install.sh dist/
-          cd dist && sha256sum nexrabot-linux-* install.sh $(ls nexra-autopay.apk 2>/dev/null) > SHA256SUMS && cat SHA256SUMS
+          cd dist && sha256sum mitseller-linux-* install.sh $(ls mit-autopay.apk 2>/dev/null) > SHA256SUMS && cat SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
-          # made from the branch it ran on; a tag with "-" (v6.0.0-beta.1) is a pre-release
+          # made from the branch it ran on; a tag with "-" (v7.0.0-beta.1) is a pre-release
           tag_name: ${{ steps.tag.outputs.tag }}
           target_commitish: ${{ github.sha }}
           prerelease: ${{ contains(steps.tag.outputs.tag, '-') }}

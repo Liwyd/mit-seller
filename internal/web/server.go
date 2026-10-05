@@ -18,9 +18,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/bot"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/bot"
+	"github.com/Liwyd/mit-seller/internal/php"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
 type Server struct {
@@ -98,7 +98,7 @@ func (s *Server) Handler() http.Handler {
 			http.Error(w, "db down", 503)
 			return
 		}
-		io.WriteString(w, "ok nexrabot "+bot.Version)
+		io.WriteString(w, "ok mitseller "+bot.Version)
 	})
 	if s.API != nil {
 		mux.Handle("/api/", s.API)

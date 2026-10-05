@@ -541,7 +541,7 @@ function deleteFolder($folderPath)
 }
 function outtypepanel($typepanel, $message)
 {
-    global $from_id, $optionMarzban, $optionX_ui_single, $optionMarzneshin, $optionmikrotik, $options_ui, $optionwgdashboard, $optionNexra;
+    global $from_id, $optionMarzban, $optionX_ui_single, $optionMarzneshin, $optionmikrotik, $options_ui, $optionwgdashboard, $optionMit;
     if ($typepanel == "marzban") {
         sendmessage($from_id, $message, $optionMarzban, 'HTML');
     } elseif ($typepanel == "x-ui_single") {
@@ -556,8 +556,8 @@ function outtypepanel($typepanel, $message)
         sendmessage($from_id, $message, $options_ui, 'HTML');
     } elseif ($typepanel == "mikrotik") {
         sendmessage($from_id, $message, $optionmikrotik, 'HTML');
-    } elseif ($typepanel == "nexra") {
-        sendmessage($from_id, $message, $optionNexra, 'HTML');
+    } elseif ($typepanel == "mit") {
+        sendmessage($from_id, $message, $optionMit, 'HTML');
     }
 }
 function isBase64($string)

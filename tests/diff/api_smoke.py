@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke test of the management API (/api/v1) that Nexra Panel uses.
+"""Smoke test of the management API (/api/v1) that Mit Panel uses.
 
 Run after run.py (it reuses the Go database the diff test leaves behind):
     python3 api_smoke.py
@@ -15,8 +15,8 @@ import urllib.error
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-WORK = os.environ.get("DIFF_WORK", "/tmp/nexrabot-diff")
-BIN = os.environ.get("NEXRABOT", "/tmp/nexrabot")
+WORK = os.environ.get("DIFF_WORK", "/tmp/mitseller-diff")
+BIN = os.environ.get("MITSELLER", "/tmp/mitseller")
 BASE = "http://127.0.0.1:9102/api/v1"
 FAILS = []
 

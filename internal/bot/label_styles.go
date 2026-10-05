@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
+	"github.com/Liwyd/mit-seller/internal/db"
 )
 
 // Colours and premium icons for any button, by its text: categories,
@@ -159,7 +159,7 @@ func decorateWith(markup any, exact, loose map[string]LabelStyle) any {
 	return m
 }
 
-// labelSuggestionKeys are the fixed buttons users see most, offered in Nexra
+// labelSuggestionKeys are the fixed buttons users see most, offered in Mit
 // Panel next to the categories, products and locations.
 var labelSuggestionKeys = []string{
 	"users.backhome", "users.backmenu", "users.closelist",

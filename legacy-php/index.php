@@ -1005,7 +1005,7 @@ if (preg_match('/subscriptionurl_(\w+)/', $datain, $dataget)) {
             "data_limit" => $data_limit
         );
         $ManagePanel->Modifyuser($user['Processing_value'], $nameloc['Service_location'], $datam);
-    } elseif ($marzban_list_get['type'] == "nexra") {
+    } elseif ($marzban_list_get['type'] == "mit") {
         if (intval($product['Service_time']) == 0) {
             $newDate = 0;
         } else {
@@ -1222,7 +1222,7 @@ if (preg_match('/subscriptionurl_(\w+)/', $datain, $dataget)) {
         $datam = array(
             "data_limit" => $data_limit
         );
-    } elseif ($marzban_list_get['type'] == "nexra") {
+    } elseif ($marzban_list_get['type'] == "mit") {
         $datam = array(
             "data_limit" => $data_limit
         );
@@ -1281,7 +1281,7 @@ if (preg_match('/subscriptionurl_(\w+)/', $datain, $dataget)) {
         setjob($nameloc['Service_location'], "total_data", $data_limit, $datauser['id']);
     }
     $ExtraVolumeResult = $ManagePanel->Modifyuser($nameloc['username'], $marzban_list_get['name_panel'], $datam);
-    if ($marzban_list_get['type'] == "nexra" && is_array($ExtraVolumeResult) && isset($ExtraVolumeResult['detail'])) {
+    if ($marzban_list_get['type'] == "mit" && is_array($ExtraVolumeResult) && isset($ExtraVolumeResult['detail'])) {
         if (intval($setting['Extra_volume']) != 0) {
             update("user", "Balance", $user['Balance'], "id", $from_id);
         }

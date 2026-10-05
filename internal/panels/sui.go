@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
+	"github.com/Liwyd/mit-seller/internal/db"
 )
 
 // S-UI authenticates with an API token kept in password_panel.

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 // Out mirrors the associative arrays ManagePanel returned in PHP.
@@ -180,8 +180,8 @@ func (m *Manager) CreateUser(namePanel, username string, expire int64, dataLimit
 		return m.wgCreate(p, username, expire, dataLimit)
 	case "mikrotik":
 		return m.mikrotikCreate(p, username)
-	case "nexra":
-		return m.nexraCreate(p, username, expire, dataLimit)
+	case "mit", "nexra":
+		return m.mitCreate(p, username, expire, dataLimit)
 	}
 	return unsuccessful("Panel Not Found")
 }
@@ -207,8 +207,8 @@ func (m *Manager) DataUser(namePanel, username string) Out {
 		return m.wgData(p, username)
 	case "mikrotik":
 		return m.mikrotikData(p, username)
-	case "nexra":
-		return m.nexraData(p, username)
+	case "mit", "nexra":
+		return m.mitData(p, username)
 	}
 	return unsuccessful("Panel Not Found")
 }
@@ -227,8 +227,8 @@ func (m *Manager) RevokeSub(namePanel, username string) Out {
 		return m.alirezaRevoke(p, username)
 	case "s_ui":
 		return m.suiRevoke(p, username)
-	case "nexra":
-		return unsuccessful("قابلیت تمدید لینک (Revoke Sub) برای پنل Nexra پشتیبانی نمی‌شود")
+	case "mit", "nexra":
+		return unsuccessful("قابلیت تمدید لینک (Revoke Sub) برای پنل Mit پشتیبانی نمی‌شود")
 	}
 	return unsuccessful("Panel Not Found")
 }
@@ -253,8 +253,8 @@ func (m *Manager) RemoveUser(namePanel, username string) Out {
 		return m.wgRemove(p, username)
 	case "mikrotik":
 		return m.mikrotikRemove(p, username)
-	case "nexra":
-		return m.nexraRemove(p, username)
+	case "mit", "nexra":
+		return m.mitRemove(p, username)
 	}
 	return unsuccessful("Panel Not Found")
 }
@@ -277,8 +277,8 @@ func (m *Manager) ResetUserDataUsage(namePanel, username string) {
 		m.WGAllowAccess(namePanel, username)
 		u := m.WGGetUser(username, namePanel)
 		m.WGResetData(str(u, "id"), namePanel)
-	case "nexra":
-		m.nexraReset(p, username)
+	case "mit", "nexra":
+		m.mitReset(p, username)
 	}
 }
 
@@ -296,8 +296,8 @@ func (m *Manager) Modifyuser(username, namePanel string, config map[string]any) 
 		return m.alirezaModify(p, username, config)
 	case "s_ui":
 		return m.suiModify(p, username, config)
-	case "nexra":
-		return m.nexraModify(p, username, config)
+	case "mit", "nexra":
+		return m.mitModify(p, username, config)
 	}
 	return nil
 }

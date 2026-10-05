@@ -1,4 +1,4 @@
-package site.nexra.autopay
+package site.mit.autopay
 
 import android.Manifest
 import android.content.Intent

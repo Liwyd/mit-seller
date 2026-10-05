@@ -1,4 +1,4 @@
-module github.com/MHBehzadian/nexra-mirzabot
+module github.com/Liwyd/mit-seller
 
 go 1.22
 

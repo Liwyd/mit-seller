@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/bot"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/bot"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 const userCols = "id, username, number, Balance, User_Status, description_blocking, limit_usertest, verify, affiliates, affiliatescount, last_message_time, step"

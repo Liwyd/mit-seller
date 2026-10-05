@@ -11,5 +11,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "NexraAutopay"
+rootProject.name = "MitAutopay"
 include ':app'

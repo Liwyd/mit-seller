@@ -670,10 +670,10 @@ $textbotlang['Admin']['login-admin'] = "
 سلام 😍
 ⭕️ Version: %s
 
-🤖 NEXRA GROUP BOT
+🤖 MIT GROUP BOT
 
-📢 join us: @NexraGroup
-🛠 support: @NexraSupport
+📢 join us: @MITvpn
+🛠 support: @MITsupports
 
 ❓راهنمایی : 
 1 - برای اضافه کردن پنل دکمه پنل   را زده و دکمه اضافه کردن پنل را بزنید.
@@ -817,7 +817,7 @@ $textbotlang['Admin']['managepanel']['notex-ui'] = "📌 نکات بعد اضا�
 $textbotlang['Admin']['managepanel']['notemarzban'] = "📌 نکات بعد اضافه کردن پنل :‌
 
 ۱ -از مدیریت پنل > تنظیم پروتکل و اینباند یک نام کاربری موجود در پنل را ارسال نمایید.";
-$textbotlang['Admin']['managepanel']['notenexra'] = "📌 نکات بعد اضافه کردن پنل:‌
+$textbotlang['Admin']['managepanel']['notemit'] = "📌 نکات بعد اضافه کردن پنل:‌
 
 ۱ - آدرس پنل رو کامل و همراه با مسیرش وارد کنید (همون لینکی که خودِ پنل بهتون داده).
 ۲ - یوزرنیم/پسورد همون اکانت ادمینیه که برای شما در پنل ساخته شده.
@@ -854,7 +854,7 @@ $textbotlang['Admin']['managepanel']['keyboardpanel']['getgroup'] = "📌 نام
 $textbotlang['Admin']['managepanel']['keyboardpanel']['setinbound'] = "✅ شناسه اینباند با موفقیت ذخیره گردید";
 $textbotlang['Admin']['managepanel']['keyboardpanel']['linksub'] = "🔗 دامنه لینک ساب";
 $textbotlang['Admin']['managepanel']['keyboardpanel']['removepanel'] = "❌ حذف پنل";
-$textbotlang['Admin']['managepanel']['keyboardpanel']['editnexracreds'] = "🔑 ویرایش اطلاعات اتصال";
+$textbotlang['Admin']['managepanel']['keyboardpanel']['editmitcreds'] = "🔑 ویرایش اطلاعات اتصال";
 $textbotlang['Admin']['managepanel']['keyboardpanel']['setvolume'] = "➕ تنظیم قیمت حجم اضافه";
 $textbotlang['Admin']['managepanel']['keyboardpanel']['on_hold_status'] = "⏳ قابلیت اولین اتصال";
 $textbotlang['Admin']['managepanel']['keyboardpanel']['usernotfount'] = "کاربر در پنل وجود ندارد";
@@ -871,7 +871,7 @@ $textbotlang['Admin']['managepanel']['type']['marzneshin'] = "مرزنشین";
 $textbotlang['Admin']['managepanel']['type']['s-ui'] = "s-ui";
 $textbotlang['Admin']['managepanel']['type']['wgdashboard'] = "wgdashboard";
 $textbotlang['Admin']['managepanel']['type']['mikrotik'] = "میکروتیک";
-$textbotlang['Admin']['managepanel']['type']['nexra'] = "Nexra Panel";
+$textbotlang['Admin']['managepanel']['type']['mit'] = "Mit Panel";
 $textbotlang['Admin']['managepanel']['type']['3x-ui'] = "سنایی";
 $textbotlang['Admin']['managepanel']['type']['alireza'] = "علیرضا";
 

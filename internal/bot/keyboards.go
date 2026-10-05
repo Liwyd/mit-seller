@@ -6,8 +6,8 @@ import (
 	"unicode"
 	"unicode/utf16"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
 // Keyboards from keyboard.php.
@@ -77,10 +77,10 @@ func (c *Ctx) kbMain() tg.Markup { return c.kbMainFor(c.fromID) }
 // menuTap turns a tap on an inline main-menu button into the label text, so
 // it takes exactly the path of the same button on the keyboard.
 func (c *Ctx) menuTap() {
-	if !strings.HasPrefix(c.datain, menuTapPrefix) {
+	key := menuTapKey(c.datain)
+	if key == "" {
 		return
 	}
-	key := strings.TrimPrefix(c.datain, menuTapPrefix)
 	known := key == "admin" && c.isAdmin
 	for _, k := range MainButtonKeys {
 		known = known || k == key
@@ -408,10 +408,10 @@ func optMarzban() *tg.ReplyKeyboard {
 		row(mp("keyboardpanel.editpassword")), row(mp("methodusername")),
 		row(mp("sublinkstatus"), mp("configstatus")), row(mp("keyboardpanel.on_hold_status")), backAdminRow())
 }
-func optNexra() *tg.ReplyKeyboard {
+func optMit() *tg.ReplyKeyboard {
 	return rk(row(mp("btnshowconnect"), mp("showpanelbtn")), row(mp("showpaneltestbtn")),
 		row(mp("keyboardpanel.namepanel"), mp("keyboardpanel.removepanel")),
-		row(mp("keyboardpanel.editnexracreds")), row(mp("methodusername")), backAdminRow())
+		row(mp("keyboardpanel.editmitcreds")), row(mp("methodusername")), backAdminRow())
 }
 func optMikrotik() *tg.ReplyKeyboard {
 	return rk(row(mp("btnshowconnect"), mp("showpanelbtn")), row(mp("showpaneltestbtn"), mp("setgroup")),
@@ -466,7 +466,7 @@ func kbTypePanel() *tg.InlineKeyboard {
 		row(cb(t("marzneshin"), "typepanel%marzneshin"), cb(t("alireza"), "typepanel%alireza")),
 		row(cb(t("s-ui"), "typepanel%s_ui"), cb(t("wgdashboard"), "typepanel%wgdashboard")),
 		row(cb(t("mikrotik"), "typepanel%mikrotik")),
-		row(cb(t("nexra"), "typepanel%nexra")),
+		row(cb(t("mit"), "typepanel%mit")),
 		row(cb(T("Admin.Back-Adminment"), "back_admin")))
 }
 
@@ -541,8 +541,8 @@ func (c *Ctx) outTypePanel(typ, msg string) {
 		k = optSUI()
 	case "mikrotik":
 		k = optMikrotik()
-	case "nexra":
-		k = optNexra()
+	case "mit", "nexra":
+		k = optMit()
 	default:
 		return
 	}

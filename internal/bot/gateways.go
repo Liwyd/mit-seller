@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 // NowPaymentsIPN is payment/nowpayments/back.php.

@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/panels"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/panels"
+	"github.com/Liwyd/mit-seller/internal/php"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
 func sleepMs(ms int) { time.Sleep(time.Duration(ms) * time.Millisecond) }
@@ -103,10 +103,10 @@ func (c *Ctx) admAutopay() bool {
 	}
 	if c.text == emojiIDButton {
 		c.sendHTML(c.fromID, "یک پیام شامل ایموجی‌های پریمیوم بفرستید تا شناسه‌شان را بدهم:", kbBackAdmin())
-		c.step("nexra_emoji_id")
+		c.step("mit_emoji_id")
 		return true
 	}
-	if c.stepIs("nexra_emoji_id") {
+	if c.stepIs("mit_emoji_id") {
 		c.emojiIDReply()
 		return true
 	}

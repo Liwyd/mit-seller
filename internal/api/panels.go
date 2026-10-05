@@ -3,12 +3,13 @@ package api
 import (
 	"net/http"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/bot"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/bot"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/panels"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
-var panelTypes = map[string]bool{"marzban": true, "x-ui_single": true, "marzneshin": true, "alireza": true, "s_ui": true, "wgdashboard": true, "mikrotik": true, "nexra": true}
+var panelTypes = map[string]bool{"marzban": true, "x-ui_single": true, "marzneshin": true, "alireza": true, "s_ui": true, "wgdashboard": true, "mikrotik": true, "mit": true, "nexra": true}
 
 func panelPublic(r db.Row, owner bool) map[string]any {
 	m := rowMap(r, "id", "name_panel", "type", "status", "statusTest", "sublink", "configManual", "onholdstatus", "MethodUsername")
@@ -64,10 +65,10 @@ func (a *API) createPanel(w http.ResponseWriter, r *http.Request) {
 	if typ == "s_ui" || typ == "wgdashboard" {
 		user = "none"
 	}
-	if typ == "nexra" {
+	if panels.IsMitType(typ) {
 		mu := f.str("marzban_url_direct")
 		if !validURL(mu) {
-			fail(w, 400, "marzban_url_direct is required for a Nexra panel")
+			fail(w, 400, "marzban_url_direct is required for a Mit panel")
 			return
 		}
 		mUser, mPass := f.str("marzban_username_direct"), f.str("marzban_password_direct")
@@ -197,8 +198,8 @@ func (a *API) testPanel(w http.ResponseWriter, r *http.Request) {
 		} else {
 			res["ok"], res["error"] = false, tok
 		}
-	case "nexra":
-		dash := pm.NexraDashboard(p)
+	case "mit", "nexra":
+		dash := pm.MitDashboard(p)
 		if e, bad := dash["detail"]; bad {
 			res["ok"], res["error"] = false, e
 		} else {

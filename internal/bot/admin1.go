@@ -5,9 +5,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/panels"
+	"github.com/Liwyd/mit-seller/internal/php"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
 // adminFlow is admin.php; every section returns true where PHP returned.
@@ -192,13 +193,13 @@ func (c *Ctx) showConnect() {
 		} else {
 			c.sendHTML(c.fromID, T("Admin.managepanel.errorstatuspanel")+jsonStr(tok), nil)
 		}
-	case "nexra":
-		dash := pm.NexraDashboard(panel)
+	case "mit", "nexra":
+		dash := pm.MitDashboard(panel)
 		if d, ok := dash["detail"]; ok {
 			c.sendHTML(c.fromID, T("Admin.managepanel.errorstatuspanel")+jmap{"d": d}.s("d"), nil)
 		} else {
 			gb := php.Round(php.Floatval(jmap(dash).s("remaining_traffic"))/(1024*1024*1024), 2)
-			c.sendHTML(c.fromID, "✅ اتصال به Nexra Panel برقرار است\nحجم باقیمانده‌ی این ادمین: "+php.FloatToString(gb)+" GB", nil)
+			c.sendHTML(c.fromID, "✅ اتصال به Mit Panel برقرار است\nحجم باقیمانده‌ی این ادمین: "+php.FloatToString(gb)+" GB", nil)
 		}
 	case "marzneshin":
 		tok := pm.MarzneshinToken(panel)
@@ -240,7 +241,7 @@ func (c *Ctx) showConnect() {
 const secretPrompt = "🔒 برای مدیریت پنل‌ها، کد مخفی را وارد کنید:"
 
 func (c *Ctx) secretOK() bool {
-	return c.b.Cfg.NexraSecret != "" && c.text == c.b.Cfg.NexraSecret
+	return c.b.Cfg.MitSecret != "" && c.text == c.b.Cfg.MitSecret
 }
 
 func (c *Ctx) admPanelAdd() bool {
@@ -249,8 +250,8 @@ func (c *Ctx) admPanelAdd() bool {
 	switch {
 	case c.text == T("Admin.keyboardadmin.add_panel"):
 		c.sendHTML(c.fromID, secretPrompt, backAdm)
-		c.step("nexra_panel_access_gate_add")
-	case c.stepIs("nexra_panel_access_gate_add"):
+		c.step("mit_panel_access_gate_add")
+	case c.stepIs("mit_panel_access_gate_add"):
 		if !c.secretOK() {
 			c.sendHTML(c.fromID, "❌ کد اشتباه است.", kbAdmin())
 			c.step("home")
@@ -258,9 +259,9 @@ func (c *Ctx) admPanelAdd() bool {
 		}
 		c.sendHTML(c.fromID, T("Admin.managepanel.selecttypepanel"), kbTypePanel())
 		// The type buttons only work right after the code was accepted.
-		c.step("nexra_panel_pick_type")
+		c.step("mit_panel_pick_type")
 	case c.m(`typepanel%(.*)`):
-		if !c.stepIs("nexra_panel_pick_type") {
+		if !c.stepIs("mit_panel_pick_type") {
 			return true
 		}
 		c.savedata(true, "type", c.g(1))
@@ -273,30 +274,30 @@ func (c *Ctx) admPanelAdd() bool {
 			return true
 		}
 		c.savedata(false, "name", c.text)
-		if c.userdata()["type"] == "nexra" {
-			c.sendHTML(c.fromID, "🔗 آدرس Nexra Panel را همراه با مسیرش وارد کنید (مثال: https://panel.example.com/dashboard):", backAdm)
-			c.step("nexra_get_nexra_url")
+		if panels.IsMitType(c.userdata()["type"]) {
+			c.sendHTML(c.fromID, "🔗 آدرس Mit Panel را همراه با مسیرش وارد کنید (مثال: https://panel.example.com/dashboard):", backAdm)
+			c.step("mit_get_mit_url")
 			return true
 		}
 		c.sendHTML(c.fromID, T("Admin.managepanel.addpanelurl"), backAdm)
 		c.step("add_link_panel")
-	case c.stepIs("nexra_get_nexra_url"):
+	case c.stepIs("mit_get_mit_url"):
 		if !filterValidateURL(c.text) {
 			c.sendHTML(c.fromID, T("Admin.managepanel.Invalid-domain"), backAdm)
 			return true
 		}
 		c.savedata(false, "url_panel", c.text)
-		c.sendHTML(c.fromID, "👤 یوزرنیم ادمین در Nexra Panel را وارد کنید:", backAdm)
-		c.step("nexra_get_nexra_username")
-	case c.stepIs("nexra_get_nexra_username"):
+		c.sendHTML(c.fromID, "👤 یوزرنیم ادمین در Mit Panel را وارد کنید:", backAdm)
+		c.step("mit_get_mit_username")
+	case c.stepIs("mit_get_mit_username"):
 		c.savedata(false, "username_panel", c.text)
-		c.sendHTML(c.fromID, "🔐 پسورد ادمین در Nexra Panel را وارد کنید:", backAdm)
-		c.step("nexra_get_nexra_password")
-	case c.stepIs("nexra_get_nexra_password"):
+		c.sendHTML(c.fromID, "🔐 پسورد ادمین در Mit Panel را وارد کنید:", backAdm)
+		c.step("mit_get_mit_password")
+	case c.stepIs("mit_get_mit_password"):
 		c.savedata(false, "password_panel", c.text)
 		c.sendHTML(c.fromID, "🔗 آدرس واقعیِ مرزبان (بدون واسطه) را وارد کنید:", backAdm)
-		c.step("nexra_get_marzban_url")
-	case c.stepIs("nexra_get_marzban_url"):
+		c.step("mit_get_marzban_url")
+	case c.stepIs("mit_get_marzban_url"):
 		if !filterValidateURL(c.text) {
 			c.sendHTML(c.fromID, T("Admin.managepanel.Invalid-domain"), backAdm)
 			return true
@@ -311,7 +312,7 @@ func (c *Ctx) admPanelAdd() bool {
 		}
 		c.sendHTML(c.fromID, T("Admin.managepanel.addedpanel"), backAdm)
 		c.sendHTML(c.fromID, "🥳", kbAdmin())
-		c.sendHTML(c.fromID, T("Admin.managepanel.notenexra"), nil)
+		c.sendHTML(c.fromID, T("Admin.managepanel.panelnotes"), nil)
 		c.step("home")
 	case c.stepIs("add_link_panel"):
 		if !filterValidateURL(c.text) {
@@ -343,8 +344,8 @@ func (c *Ctx) admPanelAdd() bool {
 			c.sendHTML(c.fromID, T("Admin.managepanel.notex-ui"), nil)
 		case "marzban", "s_ui", "marzneshin":
 			c.sendHTML(c.fromID, T("Admin.managepanel.notemarzban"), nil)
-		case "nexra":
-			c.sendHTML(c.fromID, T("Admin.managepanel.notenexra"), nil)
+		case "mit", "nexra":
+			c.sendHTML(c.fromID, T("Admin.managepanel.panelnotes"), nil)
 		case "wgdashboard":
 			c.sendHTML(c.fromID, T("Admin.managepanel.wgdashboard"), nil)
 		case "mikrotik":

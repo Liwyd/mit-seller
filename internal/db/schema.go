@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/text"
+	"github.com/Liwyd/mit-seller/internal/php"
+	"github.com/Liwyd/mit-seller/internal/text"
 )
 
 // This file is the Go version of the PHP bot's table.php. Every step is
@@ -50,6 +50,7 @@ func (d *DB) EnsureSchema(adminID string, report func(string)) error {
 	if report == nil {
 		report = func(string) {}
 	}
+	d.adoptLegacyTables(report)
 	const bin = " CHARACTER SET utf8mb4 COLLATE utf8mb4_bin"
 	const engine = " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin"
 
@@ -414,10 +415,10 @@ func (d *DB) EnsureSchema(adminID string, report func(string)) error {
         UNIQUE KEY autopay_sms_hash (hash))` + engine)
 
 	// ---- tables only the Go bot uses (the PHP bot never touches these)
-	d.Exec(`CREATE TABLE IF NOT EXISTS nexra_kv (
+	d.Exec(`CREATE TABLE IF NOT EXISTS mit_kv (
         k varchar(191) PRIMARY KEY,
         v MEDIUMTEXT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin`)
-	d.Exec(`CREATE TABLE IF NOT EXISTS nexra_broadcast (
+	d.Exec(`CREATE TABLE IF NOT EXISTS mit_broadcast (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id varchar(200) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin`)
 	if _, ok := d.KVOk("schema_version"); !ok {
@@ -432,7 +433,51 @@ var Tables = []string{
 	"user", "help", "setting", "admin", "channels", "marzban_panel", "product",
 	"invoice", "Payment_report", "Discount", "Giftcodeconsumed", "textbot",
 	"PaySetting", "DiscountSell", "affiliates", "cancel_service", "category",
-	"autopay", "autopay_order", "autopay_sms", "nexra_kv", "nexra_broadcast",
+	"autopay", "autopay_order", "autopay_sms", "mit_kv", "mit_broadcast",
+}
+
+// preRebrandTables maps a table the bot created before the rebrand to its
+// current name.
+var preRebrandTables = map[string]string{
+	"nexra_kv":        "mit_kv",
+	"nexra_broadcast": "mit_broadcast",
+}
+
+// adoptLegacyTables carries the pre-rebrand tables over to their current
+// names, before anything in this run reads them. A database set up by the old
+// bot keeps its keys, unlock codes and broadcast queue; a database that only
+// has the current tables, or none of them, is left untouched.
+func (d *DB) adoptLegacyTables(report func(string)) {
+	for old, cur := range preRebrandTables {
+		if !d.tableExists(old) {
+			continue
+		}
+		if !d.tableExists(cur) {
+			if _, err := d.Exec("ALTER TABLE `" + old + "` RENAME TO `" + cur + "`"); err != nil {
+				report("could not rename " + old + " to " + cur + ": " + err.Error())
+				continue
+			}
+			report("renamed table " + old + " to " + cur)
+			continue
+		}
+		// Both exist (a current table was created before the old one came
+		// back, e.g. from an old backup): keep what the current table has and
+		// move the rows it is missing over, then drop the old table.
+		if old == "nexra_kv" {
+			d.Exec("INSERT IGNORE INTO mit_kv (k, v) SELECT k, v FROM nexra_kv")
+		} else {
+			d.Exec(`INSERT INTO mit_broadcast (user_id)
+                SELECT b.user_id FROM nexra_broadcast b
+                WHERE NOT EXISTS (SELECT 1 FROM mit_broadcast m WHERE m.user_id = b.user_id)`)
+		}
+		if d.tableExists(old) && d.tableExists(cur) {
+			if _, err := d.Exec("DROP TABLE `" + old + "`"); err != nil {
+				report("could not drop the old table " + old + ": " + err.Error())
+				continue
+			}
+			report("merged " + old + " into " + cur + " and dropped it")
+		}
+	}
 }
 
 // IsBotTable reports whether name is one of Tables (case-sensitive, as MySQL
@@ -443,5 +488,8 @@ func IsBotTable(name string) bool {
 			return true
 		}
 	}
-	return strings.HasPrefix(name, "nexra_")
+	if strings.HasPrefix(name, "nexra_") { // pre-rebrand spelling
+		return true
+	}
+	return strings.HasPrefix(name, "mit_")
 }

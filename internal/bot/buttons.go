@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
 // Main-menu customisation (not in the PHP bot): button order, visibility,
@@ -21,7 +21,7 @@ type ButtonStyle struct {
 	Hidden bool   `json:"hidden,omitempty"` // left out of the menu (still works if typed)
 }
 
-// ButtonConfig is what nexra_kv["buttons"] holds.
+// ButtonConfig is what mit_kv["buttons"] holds.
 type ButtonConfig struct {
 	Layout  [][]string             `json:"layout"`
 	Buttons map[string]ButtonStyle `json:"buttons"`
@@ -34,7 +34,23 @@ type ButtonConfig struct {
 const MenuInline = "inline"
 
 // menuTapPrefix starts the callback data of an inline main-menu button.
-const menuTapPrefix = "nxm_"
+const menuTapPrefix = "msm_"
+
+// legacyMenuTapPrefix is menuTapPrefix before the rebrand; menus sent before
+// it still carry it and must keep working.
+const legacyMenuTapPrefix = "nxm_"
+
+// menuTapKey strips the main-menu prefix from callback data, accepting both
+// spellings, and returns "" when the tap is not a main-menu button.
+func menuTapKey(data string) string {
+	if k := strings.TrimPrefix(data, menuTapPrefix); k != data {
+		return k
+	}
+	if k := strings.TrimPrefix(data, legacyMenuTapPrefix); k != data {
+		return k
+	}
+	return ""
+}
 
 // MainButtonKeys are the menu buttons and where their label comes from.
 // textbot ids for most, a fixed text for affiliates and the admin entry.

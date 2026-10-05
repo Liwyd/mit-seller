@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">تأیید خودکار Nexra</string>
+    <string name="app_name">تأیید خودکار MIT</string>
     <string name="pairing_hint">کلید اتصال را از بات بگیر (بخش «تأیید خودکار پرداخت» → «نمایش کلید اتصال») و اینجا جای‌گذاری کن:</string>
     <string name="pair">اتصال به بات</string>
     <string name="test">تست ارتباط با سرور</string>

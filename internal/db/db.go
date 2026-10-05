@@ -12,7 +12,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 // Val is one column value as PHP would have received it.
@@ -319,11 +319,11 @@ func (d *DB) IsAdmin(id string) bool {
 
 // KV is the bot's own settings table (not used by the PHP bot).
 func (d *DB) KV(key string) string {
-	return d.Scalar("SELECT v FROM nexra_kv WHERE k = ?", key)
+	return d.Scalar("SELECT v FROM mit_kv WHERE k = ?", key)
 }
 
 func (d *DB) KVOk(key string) (string, bool) {
-	r := d.One("SELECT v FROM nexra_kv WHERE k = ?", key)
+	r := d.One("SELECT v FROM mit_kv WHERE k = ?", key)
 	if r == nil {
 		return "", false
 	}
@@ -331,7 +331,7 @@ func (d *DB) KVOk(key string) (string, bool) {
 }
 
 func (d *DB) SetKV(key, value string) {
-	d.Exec("INSERT INTO nexra_kv (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)", key, value)
+	d.Exec("INSERT INTO mit_kv (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)", key, value)
 }
 
 // Logger is replaced by main to route DB errors into the bot log.

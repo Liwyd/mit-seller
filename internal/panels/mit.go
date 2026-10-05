@@ -7,26 +7,27 @@ import (
 	"strings"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
+	"github.com/Liwyd/mit-seller/internal/db"
 )
 
-// A Nexra-type panel row talks to two servers: Nexra Panel itself
+// A Mit-type panel row talks to two servers: Mit Panel itself
 // (url_panel/username_panel/password_panel) for every write, so the admin's
 // traffic quota is enforced, and the real Marzban behind it
 // (marzban_*_direct) for read-only lookups.
 
-func nexraBase(p db.Row) string { return trimSlash(p.S("url_panel")) }
+func mitBase(p db.Row) string { return trimSlash(p.S("url_panel")) }
 
-// NexraLogin is nexra_login(): {"access_token":..} or {"error":..}.
-func (m *Manager) NexraLogin(panel db.Row) map[string]any {
+// MitLogin is mit_login(): {"access_token":..} or {"error":..}.
+func (m *Manager) MitLogin(panel db.Row) map[string]any {
 	panel = m.panelByID(panel.S("id"))
 	cache := loginCache(panel)
-	if e, ok := cache["nexra"].(map[string]any); ok && isset(e, "access_token") {
+	adoptLoginCache(cache)
+	if e, ok := cache["mit"].(map[string]any); ok && isset(e, "access_token") {
 		if tok, ok := fresh(e, 600); ok {
 			return map[string]any{"access_token": tok, "time": e["time"]}
 		}
 	}
-	r := req{method: "POST", url: nexraBase(panel) + "/login", timeout: 8 * time.Second,
+	r := req{method: "POST", url: mitBase(panel) + "/login", timeout: 8 * time.Second,
 		body:        formBody("username", panel.S("username_panel"), "password", panel.S("password_panel")),
 		contentType: "application/x-www-form-urlencoded", headers: map[string]string{"accept": "application/json"}}.do()
 	if r.err != nil {
@@ -36,16 +37,17 @@ func (m *Manager) NexraLogin(panel db.Row) map[string]any {
 	if d, ok := body["data"].(map[string]any); ok {
 		if tok, ok := d["access_token"].(string); ok {
 			e := map[string]any{"time": nowStamp(), "access_token": tok}
-			cache["nexra"] = e
+			cache["mit"] = e
+			delete(cache, "nexra") // pre-rebrand key, superseded
 			m.DB.Update("marzban_panel", "datelogin", string(marshal(cache)), "name_panel", panel.S("name_panel"))
 			return e
 		}
 	}
-	return map[string]any{"error": NexraErrorMessage(body, "Nexra login failed")}
+	return map[string]any{"error": MitErrorMessage(body, "Mit login failed")}
 }
 
-// NexraErrorMessage extracts a readable message from a Nexra/FastAPI reply.
-func NexraErrorMessage(body map[string]any, fallback string) string {
+// MitErrorMessage extracts a readable message from a Mit/FastAPI reply.
+func MitErrorMessage(body map[string]any, fallback string) string {
 	msg := fallback
 	if s, ok := body["message"].(string); ok && s != "" {
 		msg = s
@@ -65,13 +67,13 @@ func NexraErrorMessage(body map[string]any, fallback string) string {
 		}
 	}
 	if strings.Contains(strings.ToLower(msg), "insufficient traffic") {
-		return "❌ حجم پنل شما در Nexra کافی نیست. لطفاً حجم پنل را شارژ کنید.\n(" + msg + ")"
+		return "❌ حجم پنل شما در Mit کافی نیست. لطفاً حجم پنل را شارژ کنید.\n(" + msg + ")"
 	}
 	return msg
 }
 
-func (m *Manager) nexraRequest(panel db.Row, method, path string, payload any) map[string]any {
-	auth := m.NexraLogin(panel)
+func (m *Manager) mitRequest(panel db.Row, method, path string, payload any) map[string]any {
+	auth := m.MitLogin(panel)
 	tok, ok := auth["access_token"].(string)
 	if !ok {
 		e := str(auth, "error")
@@ -87,16 +89,16 @@ func (m *Manager) nexraRequest(panel db.Row, method, path string, payload any) m
 		body = marshal(payload)
 		ct = "application/json"
 	}
-	r := req{method: method, url: nexraBase(panel) + path, body: body, contentType: ct, headers: h, timeout: 10 * time.Second}.do()
+	r := req{method: method, url: mitBase(panel) + path, body: body, contentType: ct, headers: h, timeout: 10 * time.Second}.do()
 	if r.err != nil {
 		return map[string]any{"detail": r.err.Error()}
 	}
 	return jsonObj(r.body)
 }
 
-// NexraDashboard is nexra_dashboard().
-func (m *Manager) NexraDashboard(panel db.Row) map[string]any {
-	auth := m.NexraLogin(panel)
+// MitDashboard is mit_dashboard().
+func (m *Manager) MitDashboard(panel db.Row) map[string]any {
+	auth := m.MitLogin(panel)
 	tok, ok := auth["access_token"].(string)
 	if !ok {
 		e := str(auth, "error")
@@ -105,14 +107,14 @@ func (m *Manager) NexraDashboard(panel db.Row) map[string]any {
 		}
 		return map[string]any{"detail": e}
 	}
-	r := req{url: nexraBase(panel) + "/dashboard", timeout: 10 * time.Second,
+	r := req{url: mitBase(panel) + "/dashboard", timeout: 10 * time.Second,
 		headers: map[string]string{"Accept": "application/json", "Authorization": "Bearer " + tok}}.do()
 	if r.err != nil {
 		return map[string]any{"detail": r.err.Error()}
 	}
 	body := jsonObj(r.body)
 	if v, _ := body["success"].(bool); !v {
-		return map[string]any{"detail": NexraErrorMessage(body, "Nexra dashboard request failed")}
+		return map[string]any{"detail": MitErrorMessage(body, "Mit dashboard request failed")}
 	}
 	d, _ := body["data"].(map[string]any)
 	if d == nil {
@@ -121,7 +123,7 @@ func (m *Manager) NexraDashboard(panel db.Row) map[string]any {
 	return d
 }
 
-func (m *Manager) nexraDirectToken(panel db.Row) map[string]any {
+func (m *Manager) mitDirectToken(panel db.Row) map[string]any {
 	panel = m.panelByID(panel.S("id"))
 	cache := loginCache(panel)
 	if e, ok := cache["marzban"].(map[string]any); ok && isset(e, "access_token") {
@@ -149,8 +151,8 @@ func (m *Manager) nexraDirectToken(panel db.Row) map[string]any {
 	return map[string]any{"error": d}
 }
 
-func (m *Manager) nexraDirectGetUser(panel db.Row, username string) map[string]any {
-	tok := m.nexraDirectToken(panel)
+func (m *Manager) mitDirectGetUser(panel db.Row, username string) map[string]any {
+	tok := m.mitDirectToken(panel)
 	t, ok := tok["access_token"].(string)
 	if !ok {
 		e := str(tok, "error")
@@ -172,7 +174,7 @@ func phpUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
-func (m *Manager) nexraCreate(panel db.Row, username string, expire int64, dataLimit float64) Out {
+func (m *Manager) mitCreate(panel db.Row, username string, expire int64, dataLimit float64) Out {
 	exp := int64(0)
 	if expire != 0 {
 		exp = expire * 1000
@@ -181,11 +183,11 @@ func (m *Manager) nexraCreate(panel db.Row, username string, expire int64, dataL
 		"email": username, "id": phpUUID(), "enable": true,
 		"expiry_time": exp, "total": dataLimit, "sub_id": username, "flow": "",
 	}
-	res := m.nexraRequest(panel, "POST", "/admin/user", payload)
+	res := m.mitRequest(panel, "POST", "/admin/user", payload)
 	if v, _ := res["success"].(bool); !v {
-		return unsuccessful(NexraErrorMessage(res, "خطا در ساخت یوزر روی Nexra"))
+		return unsuccessful(MitErrorMessage(res, "خطا در ساخت یوزر روی Mit"))
 	}
-	created := m.nexraDirectGetUser(panel, username)
+	created := m.mitDirectGetUser(panel, username)
 	if isset(created, "detail") || !isset(created, "username") {
 		return Out{"status": "successful", "username": username, "subscription_url": "", "configs": []string{}}
 	}
@@ -200,8 +202,8 @@ func (m *Manager) nexraCreate(panel db.Row, username string, expire int64, dataL
 	return Out{"status": "successful", "username": username, "subscription_url": sub, "configs": links}
 }
 
-func (m *Manager) nexraData(panel db.Row, username string) Out {
-	u := m.nexraDirectGetUser(panel, username)
+func (m *Manager) mitData(panel db.Row, username string) Out {
+	u := m.mitDirectGetUser(panel, username)
 	if isset(u, "detail") || !isset(u, "username") {
 		d := u["detail"]
 		if d == nil {
@@ -228,22 +230,22 @@ func (m *Manager) nexraData(panel db.Row, username string) Out {
 	}
 }
 
-func (m *Manager) nexraRemove(panel db.Row, username string) Out {
-	res := m.nexraRequest(panel, "DELETE", "/admin/user/"+url.PathEscape(username), nil)
+func (m *Manager) mitRemove(panel db.Row, username string) Out {
+	res := m.mitRequest(panel, "DELETE", "/admin/user/"+url.PathEscape(username), nil)
 	if v, _ := res["success"].(bool); !v {
-		return unsuccessful(NexraErrorMessage(res, "خطا در حذف یوزر روی Nexra"))
+		return unsuccessful(MitErrorMessage(res, "خطا در حذف یوزر روی Mit"))
 	}
 	return Out{"status": "successful", "username": username}
 }
 
-func (m *Manager) nexraReset(panel db.Row, username string) {
-	m.nexraRequest(panel, "PUT", "/admin/user/"+url.PathEscape(username)+"/reset", nil)
+func (m *Manager) mitReset(panel db.Row, username string) {
+	m.mitRequest(panel, "PUT", "/admin/user/"+url.PathEscape(username)+"/reset", nil)
 }
 
-// nexraModify mirrors Modifyuser_nexra: unspecified fields are filled from
+// mitModify mirrors Modifyuser_mit: unspecified fields are filled from
 // the live Marzban record. Errors come back as {"detail": ...}.
-func (m *Manager) nexraModify(panel db.Row, username string, data map[string]any) Out {
-	cur := m.nexraDirectGetUser(panel, username)
+func (m *Manager) mitModify(panel db.Row, username string, data map[string]any) Out {
+	cur := m.mitDirectGetUser(panel, username)
 	if isset(cur, "detail") || !isset(cur, "username") {
 		d := cur["detail"]
 		if d == nil {
@@ -271,9 +273,9 @@ func (m *Manager) nexraModify(panel db.Row, username string, data map[string]any
 		"email": username, "enable": enable, "expiry_time": expire,
 		"total": total, "sub_id": username, "flow": "",
 	}
-	res := m.nexraRequest(panel, "PUT", "/admin/user/"+url.PathEscape(username), payload)
+	res := m.mitRequest(panel, "PUT", "/admin/user/"+url.PathEscape(username), payload)
 	if v, _ := res["success"].(bool); !v {
-		return Out{"detail": NexraErrorMessage(res, "خطا در ویرایش یوزر روی Nexra")}
+		return Out{"detail": MitErrorMessage(res, "خطا در ویرایش یوزر روی Mit")}
 	}
 	return Out{"username": username, "success": true}
 }

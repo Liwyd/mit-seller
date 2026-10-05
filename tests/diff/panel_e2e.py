@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Nexra Panel "Bot" section against a real nexrabot.
+"""Mit Panel "Bot" section against a real mitseller.
 
-Needs the Go database run.py leaves behind, and a Nexra Panel checkout
-(PANEL_DIR, default ../nexra-panel next to this repo) with `uv sync` done,
+Needs the Go database run.py leaves behind, and a Mit Panel checkout
+(PANEL_DIR, default ../mit-panel next to this repo) with `uv sync` done,
 its .env (ADMIN_USERNAME=super, ADMIN_PASSWORD=superpw, PORT=8765) and
 `alembic upgrade head` run. Starts the mock, the bot and the panel, then
 drives the panel's /bots API as the superadmin, as the assigned admin and as
@@ -19,9 +19,9 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
-PANEL = os.environ.get("PANEL_DIR", os.path.join(os.path.dirname(ROOT), "nexra-panel"))
-WORK = os.environ.get("DIFF_WORK", "/tmp/nexrabot-diff")
-BIN = os.environ.get("NEXRABOT", "/tmp/nexrabot")
+PANEL = os.environ.get("PANEL_DIR", os.path.join(os.path.dirname(ROOT), "mit-panel"))
+WORK = os.environ.get("DIFF_WORK", "/tmp/mitseller-diff")
+BIN = os.environ.get("MITSELLER", "/tmp/mitseller")
 P = "http://127.0.0.1:8765/dashboard"
 FAILS = []
 
@@ -88,7 +88,7 @@ def wait(url):
 
 
 def main():
-    env = dict(os.environ, WALPANEL_DATA_DIR=os.path.join(PANEL, "data"))
+    env = dict(os.environ, MITPANEL_DATA_DIR=os.path.join(PANEL, "data"))
     procs = [
         subprocess.Popen([sys.executable, os.path.join(HERE, "mock.py"), "9202"]),
         subprocess.Popen([BIN, "serve", "-c", os.path.join(WORK, "go.env")],
@@ -180,7 +180,7 @@ def run():
     # bot key revoked -> must not log the panel user out
     req("PUT", "/sales-bots/manage/%d" % bid, su, body={"name": "Bot7"})
     import sqlite3
-    cn = sqlite3.connect(os.path.join(PANEL, "data", "walpanel.db"))
+    cn = sqlite3.connect(os.path.join(PANEL, "data", "mitpanel.db"))
     cn.execute("UPDATE telegram_bots SET manager_key = 'revoked' WHERE id = ?", (bid,))
     cn.commit()
     expect("revoked key -> 502 not 401", "GET", "/sales-bots/%d/api/info" % bid, 502, ad)
@@ -208,7 +208,7 @@ def run():
     check("non-apk refused", c == 400, (c, j))
     c, j = req("POST", "/sales-bots/autopay-app/upload", su, files=("file", "a.apk", b"not a zip"))
     check("non-zip refused", c == 400, (c, j))
-    c, j = req("POST", "/sales-bots/autopay-app/upload", su, files=("file", "nexra.apk", b"PK\x03\x04fake apk"))
+    c, j = req("POST", "/sales-bots/autopay-app/upload", su, files=("file", "mit.apk", b"PK\x03\x04fake apk"))
     check("superadmin uploads app", c == 200 and j["data"]["available"], (c, j))
     c, payload, ctype = req("GET", "/sales-bots/autopay-app/download", ad, raw=True)
     check("admin downloads app", c == 200 and payload == b"PK\x03\x04fake apk" and "android" in ctype, (c, ctype))
@@ -221,19 +221,19 @@ def run():
         os.remove(packs_file)
     p = expect("no packs yet", "GET", "/sales-bots/emoji-packs", 200, ad)
     check("not configured", p and p["configured"] is False and p["packs"] == [], p)
-    expect("admin cannot add packs", "POST", "/sales-bots/emoji-packs", 403, ad, {"link": "https://t.me/addemoji/NexraPack"})
+    expect("admin cannot add packs", "POST", "/sales-bots/emoji-packs", 403, ad, {"link": "https://t.me/addemoji/MitPack"})
     expect("unknown pack", "POST", "/sales-bots/emoji-packs", 404, su, {"link": "https://t.me/addemoji/Missing"})
-    r = expect("add pack by link", "POST", "/sales-bots/emoji-packs", 200, su, {"link": "https://t.me/addemoji/NexraPack"})
+    r = expect("add pack by link", "POST", "/sales-bots/emoji-packs", 200, su, {"link": "https://t.me/addemoji/MitPack"})
     check("pack stored and pushed", r and len(r["packs"][0]["emojis"]) == 2 and r["pushed"] and r["pushed"][0]["ok"], r)
-    expect("same pack twice", "POST", "/sales-bots/emoji-packs", 409, su, {"link": "NexraPack"})
+    expect("same pack twice", "POST", "/sales-bots/emoji-packs", 409, su, {"link": "MitPack"})
     al = expect("bot got the allow-list", "GET", "/sales-bots/%d/api/emoji-allow" % bid, 200, ad)
     check("bot restricted to the pack", al and al["restricted"] and sorted(al["ids"]) == ["5368324170671202286", "5368324170671202287"], al)
     expect("admin cannot change the allow-list", "PUT", "/sales-bots/%d/api/emoji-allow" % bid, 403, ad, {"restricted": False})
-    expect("admin browses an allowed pack", "GET", "/sales-bots/%d/api/emoji-pack/NexraPack" % bid, 200, ad)
+    expect("admin browses an allowed pack", "GET", "/sales-bots/%d/api/emoji-pack/MitPack" % bid, 200, ad)
     expect("admin cannot browse other packs", "GET", "/sales-bots/%d/api/emoji-pack/OtherPack" % bid, 403, ad)
     expect("icon outside the packs refused", "PUT", "/sales-bots/%d/api/buttons" % bid, 400, ad, {"buttons": {"text_sell": {"emoji": "5368324170671202299"}}})
     expect("icon from the pack accepted", "PUT", "/sales-bots/%d/api/buttons" % bid, 200, ad, {"buttons": {"text_sell": {"emoji": "5368324170671202286"}}})
-    r = expect("remove pack", "DELETE", "/sales-bots/emoji-packs/NexraPack", 200, su)
+    r = expect("remove pack", "DELETE", "/sales-bots/emoji-packs/MitPack", 200, su)
     al = expect("allow-list after removal", "GET", "/sales-bots/%d/api/emoji-allow" % bid, 200, su)
     check("nothing allowed now", al and al["restricted"] and al["ids"] == [], al)
     os.remove(packs_file)

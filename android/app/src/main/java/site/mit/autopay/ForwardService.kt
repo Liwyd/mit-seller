@@ -1,4 +1,4 @@
-package site.nexra.autopay
+package site.mit.autopay
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -24,8 +24,8 @@ class ForwardService : Service() {
 
     companion object {
         const val CHANNEL = "autopay"
-        const val ACTION_FLUSH = "site.nexra.autopay.FLUSH"
-        const val ACTION_SCAN = "site.nexra.autopay.SCAN"
+        const val ACTION_FLUSH = "site.mit.autopay.FLUSH"
+        const val ACTION_SCAN = "site.mit.autopay.SCAN"
         private const val LOOP_MS = 60_000L
         private const val HEARTBEAT_MS = 300_000L
 

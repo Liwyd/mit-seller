@@ -1,14 +1,14 @@
-// Command nexrabot is the Go version of the Nexra Mirza bot.
+// Command mitseller is the Go version of the Mit Mirza bot.
 //
-//	nexrabot serve        -c /etc/nexrabot/bot7.env
-//	nexrabot migrate-php  --php-dir /var/www/html/botmirzapanel7 --out /etc/nexrabot/bot7.env --listen 127.0.0.1:8107
-//	nexrabot import-sql   -c /etc/nexrabot/bot7.env --file backup.sql [--force]
-//	nexrabot schema       -c /etc/nexrabot/bot7.env
-//	nexrabot set-webhook  -c /etc/nexrabot/bot7.env
-//	nexrabot keys         -c /etc/nexrabot/bot7.env
-//	nexrabot check        -c /etc/nexrabot/bot7.env
-//	nexrabot db-dump      -c /etc/nexrabot/bot7.env --out /root/bot7.sql.gz
-//	nexrabot autopay-test -c ... parse | status | send <amount> | send-raw <text>
+//	mitseller serve        -c /etc/mitseller/bot7.env
+//	mitseller migrate-php  --php-dir /var/www/html/botmirzapanel7 --out /etc/mitseller/bot7.env --listen 127.0.0.1:8107
+//	mitseller import-sql   -c /etc/mitseller/bot7.env --file backup.sql [--force]
+//	mitseller schema       -c /etc/mitseller/bot7.env
+//	mitseller set-webhook  -c /etc/mitseller/bot7.env
+//	mitseller keys         -c /etc/mitseller/bot7.env
+//	mitseller check        -c /etc/mitseller/bot7.env
+//	mitseller db-dump      -c /etc/mitseller/bot7.env --out /root/bot7.sql.gz
+//	mitseller autopay-test -c ... parse | status | send <amount> | send-raw <text>
 package main
 
 import (
@@ -31,18 +31,18 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/api"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/bot"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/config"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/migrate"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/web"
+	"github.com/Liwyd/mit-seller/internal/api"
+	"github.com/Liwyd/mit-seller/internal/bot"
+	"github.com/Liwyd/mit-seller/internal/config"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/migrate"
+	"github.com/Liwyd/mit-seller/internal/php"
+	"github.com/Liwyd/mit-seller/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/web"
 )
 
 func usage() {
-	fmt.Fprintln(os.Stderr, `usage: nexrabot <command> [flags]
+	fmt.Fprintln(os.Stderr, `usage: mitseller <command> [flags]
 
 commands:
   serve         run the bot (webhook, crons, management API)
@@ -50,10 +50,10 @@ commands:
   import-sql    load a mysqldump backup into the configured database
   schema        create/upgrade the database tables (safe to repeat)
   set-webhook   point the Telegram webhook at this bot
-  keys          print the management API keys for Nexra Panel
+  keys          print the management API keys for Mit Panel
   check         test the database, the schema and the bot token
   init-config   write a config file for a new bot (used by install.sh)
-  panel-register connect this bot to Nexra Panel and give it to its owner
+  panel-register connect this bot to Mit Panel and give it to its owner
   db-dump       back up the bot's database (mysqldump, gzipped)
   autopay-test  check the bank SMS parser / simulate a deposit
   admin-ids     print the bot admins' Telegram ids (main admin first)
@@ -103,8 +103,19 @@ func die(format string, a ...any) {
 	os.Exit(1)
 }
 
+// envValue reads the first of the given environment variables that is set,
+// so a current name and its pre-rebrand spelling both work.
+func envValue(names ...string) string {
+	for _, n := range names {
+		if v, ok := os.LookupEnv(n); ok {
+			return v
+		}
+	}
+	return ""
+}
+
 func loadConfig(fs *flag.FlagSet, args []string) *config.Config {
-	path := fs.String("c", os.Getenv("NEXRABOT_CONFIG"), "config file")
+	path := fs.String("c", envValue("MITSELLER_CONFIG", "NEXRABOT_CONFIG"), "config file")
 	_ = fs.Parse(args)
 	cfg, err := config.Load(*path)
 	if err != nil {
@@ -157,7 +168,7 @@ func cmdServe(args []string) {
 	}
 	hs := srv.Run(cfg.Listen)
 	go func() {
-		logger.Printf("nexrabot %s listening on %s for @%s", bot.Version, cfg.Listen, cfg.BotUsername)
+		logger.Printf("mitseller %s listening on %s for @%s", bot.Version, cfg.Listen, cfg.BotUsername)
 		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			die("http: %v", err)
 		}
@@ -176,9 +187,9 @@ func cmdServe(args []string) {
 func cmdMigrate(args []string) {
 	fs := flag.NewFlagSet("migrate-php", flag.ExitOnError)
 	dir := fs.String("php-dir", "", "directory of the PHP bot (holding config.php)")
-	out := fs.String("out", "", "config file to write (e.g. /etc/nexrabot/bot7.env)")
+	out := fs.String("out", "", "config file to write (e.g. /etc/mitseller/bot7.env)")
 	listen := fs.String("listen", "127.0.0.1:8080", "address the Go bot will listen on")
-	dataDir := fs.String("data-dir", "/var/lib/nexrabot", "data directory")
+	dataDir := fs.String("data-dir", "/var/lib/mitseller", "data directory")
 	cleanCron := fs.Bool("clean-crontab", true, "remove this bot's /cron/*.php crontab lines (the Go bot runs them itself)")
 	skipDB := fs.Bool("skip-db", false, "only write the config; do not touch the database or the crontab")
 	_ = fs.Parse(args)
@@ -193,7 +204,7 @@ func cmdMigrate(args []string) {
 	cfg.DataDir = *dataDir
 	cfg.LegacyPHPDir = *dir
 	if old, err := config.Load(*out); err == nil && old.APIOwnerKey != "" {
-		// re-running keeps the keys Nexra Panel already uses
+		// re-running keeps the keys Mit Panel already uses
 		cfg.APIOwnerKey, cfg.APIManagerKey, cfg.WebhookSecret = old.APIOwnerKey, old.APIManagerKey, old.WebhookSecret
 	}
 	if cfg.APIOwnerKey == "" {
@@ -292,7 +303,7 @@ func cmdKeys(args []string) {
 
 func cmdAutopayTest(args []string) {
 	fs := flag.NewFlagSet("autopay-test", flag.ExitOnError)
-	path := fs.String("c", os.Getenv("NEXRABOT_CONFIG"), "config file")
+	path := fs.String("c", envValue("MITSELLER_CONFIG", "NEXRABOT_CONFIG"), "config file")
 	_ = fs.Parse(args)
 	rest := fs.Args()
 	sub := "status"
@@ -332,14 +343,14 @@ func cmdAutopayTest(args []string) {
 		fmt.Println(b.AutopayRecentSMS())
 	case "send":
 		if len(rest) < 2 || php.Intval(rest[1]) <= 0 {
-			die("usage: nexrabot autopay-test -c FILE send <amount in toman>")
+			die("usage: mitseller autopay-test -c FILE send <amount in toman>")
 		}
 		amount := php.Intval(rest[1])
 		body := "بانک تست\nواریز " + php.NumberFormat(float64(amount*10), 0) + " ریال\nمانده 1,000,000 ریال"
 		fmt.Println(b.AutopayHandleSMS(body, "TEST", php.DateNow("Y-m-d H:i:s")))
 	case "send-raw":
 		if len(rest) < 2 {
-			die("usage: nexrabot autopay-test -c FILE send-raw \"<sms text>\"")
+			die("usage: mitseller autopay-test -c FILE send-raw \"<sms text>\"")
 		}
 		fmt.Println(b.AutopayHandleSMS(rest[1], "TEST", php.DateNow("Y-m-d H:i:s")))
 	default:
@@ -384,7 +395,7 @@ func cmdDump(args []string) {
 	if *out == "" {
 		die("--out is required")
 	}
-	defs, err := os.CreateTemp("", "nexrabot-my-*.cnf")
+	defs, err := os.CreateTemp("", "mitseller-my-*.cnf")
 	if err != nil {
 		die("%v", err)
 	}
@@ -430,15 +441,15 @@ func cmdDump(args []string) {
 func cmdInitConfig(args []string) {
 	fs := flag.NewFlagSet("init-config", flag.ExitOnError)
 	out := fs.String("out", "", "config file to write")
-	c := &config.Config{DBHost: "localhost", DBPort: "3306", DataDir: "/var/lib/nexrabot"}
+	c := &config.Config{DBHost: "localhost", DBPort: "3306", DataDir: "/var/lib/mitseller"}
 	fs.StringVar(&c.BotToken, "token", "", "bot token")
 	fs.StringVar(&c.AdminID, "admin", "", "numeric Telegram id of the main admin")
 	fs.StringVar(&c.Domain, "domain", "", "domain the webhook is served on")
 	fs.StringVar(&c.BotUsername, "bot-username", "", "bot username")
-	fs.StringVar(&c.NexraSecret, "secret", "", "secret code for panel management")
+	fs.StringVar(&c.MitSecret, "secret", "", "secret code for panel management")
 	fs.StringVar(&c.DBName, "db-name", "", "database name")
 	fs.StringVar(&c.DBUser, "db-user", "", "database user")
-	fs.StringVar(&c.DBPass, "db-pass", os.Getenv("NEXRABOT_INIT_DB_PASS"), "database password (or NEXRABOT_INIT_DB_PASS)")
+	fs.StringVar(&c.DBPass, "db-pass", envValue("MITSELLER_INIT_DB_PASS", "NEXRABOT_INIT_DB_PASS"), "database password (or MITSELLER_INIT_DB_PASS)")
 	fs.StringVar(&c.Listen, "listen", "127.0.0.1:8080", "address to listen on")
 	_ = fs.Parse(args)
 	if *out == "" || c.BotToken == "" || c.AdminID == "" || c.Domain == "" || c.DBName == "" || c.DBUser == "" {
@@ -470,26 +481,26 @@ func cmdAdminIDs(args []string) {
 	}
 }
 
-// cmdPanelRegister logs into Nexra Panel as its superadmin and connects this
+// cmdPanelRegister logs into Mit Panel as its superadmin and connects this
 // bot there (or refreshes the connection); the panel gives it to the admin it
-// belongs to. The password is read from NEXRA_PANEL_PASS.
+// belongs to. The password is read from MIT_PANEL_PASS (NEXRA_PANEL_PASS before the rebrand).
 func cmdPanelRegister(args []string) {
 	fs := flag.NewFlagSet("panel-register", flag.ExitOnError)
-	panelURL := fs.String("panel", os.Getenv("NEXRA_PANEL_URL"), "Nexra Panel address with its path, e.g. https://panel.example.com/dashboard")
-	user := fs.String("user", os.Getenv("NEXRA_PANEL_USER"), "Nexra Panel superadmin username")
+	panelURL := fs.String("panel", envValue("MIT_PANEL_URL", "NEXRA_PANEL_URL"), "Mit Panel address with its path, e.g. https://panel.example.com/dashboard")
+	user := fs.String("user", envValue("MIT_PANEL_USER", "NEXRA_PANEL_USER"), "Mit Panel superadmin username")
 	fetchApp := fs.Bool("fetch-app", true, "also have the panel fetch the auto-confirm app if it has none")
-	ignore := fs.String("ignore-ids", os.Getenv("NEXRA_PANEL_IGNORE_IDS"),
+	ignore := fs.String("ignore-ids", envValue("MIT_PANEL_IGNORE_IDS", "NEXRA_PANEL_IGNORE_IDS"),
 		"comma-separated Telegram ids that are admin on every bot (the panel owner's); not used to pick the bot's owner")
 	cfg := loadConfig(fs, args)
-	pass := os.Getenv("NEXRA_PANEL_PASS")
+	pass := envValue("MIT_PANEL_PASS", "NEXRA_PANEL_PASS")
 	if *panelURL == "" || *user == "" || pass == "" {
-		die("--panel, --user and NEXRA_PANEL_PASS are required")
+		die("--panel, --user and MIT_PANEL_PASS are required")
 	}
 	base := strings.TrimRight(*panelURL, "/")
 	hc := &http.Client{Timeout: 60 * time.Second}
 	// a panel on this same server with its own (domain) certificate is
 	// reached by 127.0.0.1, where that certificate can't match
-	if u, err := url.Parse(base); err == nil && os.Getenv("NEXRA_PANEL_INSECURE") == "1" &&
+	if u, err := url.Parse(base); err == nil && envValue("MIT_PANEL_INSECURE", "NEXRA_PANEL_INSECURE") == "1" &&
 		(u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost") {
 		hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	}
@@ -547,9 +558,9 @@ func cmdPanelRegister(args []string) {
 	}
 	data, _ := out["data"].(map[string]any)
 	if who, _ := data["assigned_to"].(string); who != "" {
-		fmt.Printf("connected to Nexra Panel and given to %s (%v)\n", who, data["reason"])
+		fmt.Printf("connected to Mit Panel and given to %s (%v)\n", who, data["reason"])
 	} else {
-		fmt.Printf("connected to Nexra Panel; NOT given to any admin: %v. Assign it in Bot → اتصال ربات‌ها.\n", data["reason"])
+		fmt.Printf("connected to Mit Panel; NOT given to any admin: %v. Assign it in Bot → اتصال ربات‌ها.\n", data["reason"])
 	}
 	if *fetchApp {
 		if info, err := call("GET", "/sales-bots/autopay-app/info", nil); err == nil {

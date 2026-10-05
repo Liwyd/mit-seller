@@ -1,4 +1,4 @@
-// Package api is the management API Nexra Panel uses to run a bot: products,
+// Package api is the management API Mit Panel uses to run a bot: products,
 // categories, discounts, texts, buttons, payments, users, autopay and — with
 // the owner key only — the VPN panels the bot sells from.
 //
@@ -14,8 +14,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/bot"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
+	"github.com/Liwyd/mit-seller/internal/bot"
+	"github.com/Liwyd/mit-seller/internal/db"
 )
 
 type role int

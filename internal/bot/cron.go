@@ -2,16 +2,16 @@ package bot
 
 import (
 	"encoding/json"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
+	"github.com/Liwyd/mit-seller/internal/db"
 	"math"
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 // The PHP bot ran its periodic jobs from crontab (curl .../cron/*.php). They
 // run inside the Go process instead, with the same intervals and on/off
-// switches (stored in nexra_kv).
+// switches (stored in mit_kv).
 
 // RunCrons starts the schedulers; stop closes them.
 func (b *Bot) RunCrons(stop <-chan struct{}) {
@@ -226,19 +226,19 @@ func (b *Bot) notifyAutoCard(rep, buyer db.Row) {
 // StartBroadcast queues info (JSON {"text":..,"id_admin":..}) for every active user.
 func (b *Bot) StartBroadcast(info string) int64 {
 	d := b.DB
-	d.Exec("DELETE FROM nexra_broadcast")
-	d.Exec("INSERT INTO nexra_broadcast (user_id) SELECT id FROM user WHERE User_Status = 'Active'")
+	d.Exec("DELETE FROM mit_broadcast")
+	d.Exec("INSERT INTO mit_broadcast (user_id) SELECT id FROM user WHERE User_Status = 'Active'")
 	d.SetKV("broadcast_info", info)
-	return d.Count("SELECT COUNT(*) FROM nexra_broadcast")
+	return d.Count("SELECT COUNT(*) FROM mit_broadcast")
 }
 
 func (b *Bot) CancelBroadcast() {
-	b.DB.Exec("DELETE FROM nexra_broadcast")
+	b.DB.Exec("DELETE FROM mit_broadcast")
 	b.DB.SetKV("broadcast_info", "")
 }
 
 // BroadcastPending reports how many recipients are left.
-func (b *Bot) BroadcastPending() int64 { return b.DB.Count("SELECT COUNT(*) FROM nexra_broadcast") }
+func (b *Bot) BroadcastPending() int64 { return b.DB.Count("SELECT COUNT(*) FROM mit_broadcast") }
 
 func (b *Bot) cronSendMessage() {
 	d := b.DB
@@ -249,7 +249,7 @@ func (b *Bot) cronSendMessage() {
 	var info map[string]any
 	_ = json.Unmarshal([]byte(raw), &info)
 	text, _ := info["text"].(string)
-	rows := d.MustQuery("SELECT id, user_id FROM nexra_broadcast ORDER BY id LIMIT 20")
+	rows := d.MustQuery("SELECT id, user_id FROM mit_broadcast ORDER BY id LIMIT 20")
 	if len(rows) == 0 {
 		if admin := php.ToString(info["id_admin"]); admin != "" {
 			b.TG.SendMessage(admin, T("users.cron.sendedmessage"), nil, "HTML")
@@ -259,7 +259,7 @@ func (b *Bot) cronSendMessage() {
 	}
 	for _, r := range rows {
 		b.TG.SendMessage(r.S("user_id"), text, nil, "HTML")
-		d.Exec("DELETE FROM nexra_broadcast WHERE id = ?", r.S("id"))
+		d.Exec("DELETE FROM mit_broadcast WHERE id = ?", r.S("id"))
 	}
 }
 

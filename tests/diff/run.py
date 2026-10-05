@@ -7,8 +7,8 @@ compared after each step.
 
 Needs: a MariaDB/MySQL server reachable on /var/run/mysqld/mysqld.sock as
 root without password (e.g. started with --skip-grant-tables), php-cli with
-mysqli/pdo_mysql/gd, and the nexrabot binary at $NEXRABOT (default
-/tmp/nexrabot).
+mysqli/pdo_mysql/gd, and the mitseller binary at $MITSELLER (default
+/tmp/mitseller).
 """
 import json
 import os
@@ -23,8 +23,8 @@ import urllib.request
 import pymysql
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-WORK = os.environ.get("DIFF_WORK", "/tmp/nexrabot-diff")
-BIN = os.environ.get("NEXRABOT", "/tmp/nexrabot")
+WORK = os.environ.get("DIFF_WORK", "/tmp/mitseller-diff")
+BIN = os.environ.get("MITSELLER", "/tmp/mitseller")
 PHP_PORT, GO_PORT = 9101, 9102
 MOCK_PHP, MOCK_GO = 9201, 9202
 TOKEN_PHP, TOKEN_GO = "111:PHP", "222:GO"
@@ -84,7 +84,7 @@ def setup():
     cfg = open(os.path.join(phpdir, "config.php")).read()
     for a, b in {"{DATABASE_NAME}": "difphp", "{DATABASE_USERNAME}": "root", "{DATABASE_PASSOWRD}": "",
                  "{BOT_TOKEN}": TOKEN_PHP, "{ADMIN_#ID}": ADMIN, "{DOMAIN.COM/PATH/BOT}": "bot.test",
-                 "{BOT_USERNAME}": "testbot", "{NEXRA_SECRET}": SECRET}.items():
+                 "{BOT_USERNAME}": "testbot", "{MIT_SECRET}": SECRET}.items():
         cfg = cfg.replace(a, b)
     open(os.path.join(phpdir, "config.php"), "w").write(cfg)
     api = open(os.path.join(phpdir, "botapi.php")).read()
@@ -108,7 +108,7 @@ def setup():
     gocfg = os.path.join(WORK, "go.env")
     open(gocfg, "w").write("\n".join([
         "BOT_TOKEN=" + TOKEN_GO, "ADMIN_ID=" + ADMIN, "DOMAIN=bot.test", "BOT_USERNAME=testbot",
-        "NEXRA_SECRET=" + SECRET, "DB_NAME=difgo", "DB_USER=root", "DB_PASS=", "DB_SOCKET=/var/run/mysqld/mysqld.sock",
+        "MIT_SECRET=" + SECRET, "DB_NAME=difgo", "DB_USER=root", "DB_PASS=", "DB_SOCKET=/var/run/mysqld/mysqld.sock",
         "LISTEN=127.0.0.1:%d" % GO_PORT, "TELEGRAM_API=http://127.0.0.1:%d" % MOCK_GO, "SYNC_UPDATES=1",
         "CHECK_TELEGRAM_IP=0", "DISABLE_CRONS=1", "API_OWNER_KEY=owner", "API_MANAGER_KEY=manager", ""]))
     sh("%s import-sql -c %s --file %s > %s 2>&1" % (BIN, gocfg, dump, os.path.join(WORK, "import.log")))
@@ -126,12 +126,12 @@ def seed(name, mock):
     c.execute("INSERT INTO marzban_panel (name_panel,url_panel,username_panel,password_panel,type,inboundid,sublink,configManual,MethodUsername,statusTest,status,onholdstatus,proxies,inbounds) VALUES "
               "('Germany', %s, 'admin', 'pass', 'marzban', '0', 'onsublink', 'offconfig', 'آیدی عددی + حروف و عدد رندوم', 'ontestshowpanel', 'activepanel', 'offonhold', '{\"vless\":{}}', '{\"vless\":[\"VLESS TCP\"]}')", (base,))
     c.execute("INSERT INTO marzban_panel (name_panel,url_panel,username_panel,password_panel,type,inboundid,sublink,configManual,MethodUsername,statusTest,status,onholdstatus,marzban_url_direct,marzban_username_direct,marzban_password_direct) VALUES "
-              "('NexraDE', %s, 'reseller', 'pass', 'nexra', '0', 'onsublink', 'offconfig', 'دلخواه یا رندوم (انتخاب با کاربر)', 'ontestshowpanel', 'activepanel', 'offonhold', %s, 'sudo', 'pass')", (base + "/dashboard", base))
+              "('MitDE', %s, 'reseller', 'pass', 'mit', '0', 'onsublink', 'offconfig', 'دلخواه یا رندوم (انتخاب با کاربر)', 'ontestshowpanel', 'activepanel', 'offonhold', %s, 'sudo', 'pass')", (base + "/dashboard", base))
     c.execute("INSERT INTO category (remark) VALUES ('ماهانه'), ('سه ماهه')")
     c.execute("INSERT INTO product (code_product,name_product,price_product,Volume_constraint,Location,Service_time,Category) VALUES "
               "('aa01','۳۰ گیگ یک ماهه','50000','30','Germany','30','1'),"
               "('aa02','۶۰ گیگ سه ماهه','120000','60','/all','90','2'),"
-              "('aa03','نکسرا ۵۰ گیگ','80000','50','NexraDE','30','1')")
+              "('aa03','MIT ۵۰ گیگ','80000','50','MitDE','30','1')")
     c.execute("INSERT INTO DiscountSell (codeDiscount, price, limitDiscount, usedDiscount, usefirst) VALUES ('OFF20','20','10','0','0')")
     c.execute("INSERT INTO Discount (code, price) VALUES ('GIFT', '15000')")
 
@@ -190,7 +190,7 @@ def cb(uid, data, text="پیام قبلی", username=None, caption=None):
 HEXRUN = re.compile(r"[0-9a-f]{4,}")
 FA_TIME = re.compile(r"[۰-۹]{2}:[۰-۹]{2}:[۰-۹]{2}")
 TIME = re.compile(r"\d{4}[/-]\d{2}[/-]\d{2}[ T]\d{2}:\d{2}:\d{2}")
-RAND_USER = re.compile(r"(\d{5,}|nexra)_[0-9a-f]{4}(?![0-9a-f])")
+RAND_USER = re.compile(r"(\d{5,}|mit)_[0-9a-f]{4}(?![0-9a-f])")
 MOCKPORT = re.compile(r":92\d\d\b")
 VERSION = re.compile(r"Version: [0-9][^\n]*")
 
@@ -318,7 +318,7 @@ MASK_COLS = {
     "autopay_order": {"created_at", "closed_at", "id"},
     "autopay_sms": {"received_at", "id", "hash"},
 }
-SKIP_TABLES = {"nexra_kv", "nexra_broadcast"}
+SKIP_TABLES = {"mit_kv", "mit_broadcast"}
 
 
 def snapshot(dbname, tk):

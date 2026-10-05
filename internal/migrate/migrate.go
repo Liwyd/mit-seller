@@ -14,8 +14,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/config"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
+	"github.com/Liwyd/mit-seller/internal/config"
+	"github.com/Liwyd/mit-seller/internal/db"
 )
 
 var (
@@ -58,7 +58,7 @@ func ReadPHPConfig(path string) (*config.Config, error) {
 		AdminID:     vars["adminnumber"],
 		Domain:      strings.TrimRight(vars["domainhosts"], "/"),
 		BotUsername: strings.TrimPrefix(vars["usernamebot"], "@"),
-		NexraSecret: defs["NEXRA_SECRET_CODE"],
+		MitSecret:   firstDef(defs, "MIT_SECRET_CODE", "NEXRA_SECRET_CODE"),
 		DBHost:      "localhost",
 		DBPort:      "3306",
 		DBName:      vars["dbname"],
@@ -70,10 +70,22 @@ func ReadPHPConfig(path string) (*config.Config, error) {
 			return nil, fmt.Errorf("config.php: $%s is not set", k)
 		}
 	}
-	if strings.HasPrefix(c.NexraSecret, "{") {
-		c.NexraSecret = ""
+	if strings.HasPrefix(c.MitSecret, "{") {
+		c.MitSecret = ""
 	}
 	return c, nil
+}
+
+// firstDef returns the value of the first of the given config.php definitions
+// that is present, so a config written before the rebrand (NEXRA_SECRET_CODE)
+// is read exactly like a current one (MIT_SECRET_CODE).
+func firstDef(defs map[string]string, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := defs[k]; ok {
+			return v
+		}
+	}
+	return ""
 }
 
 // CronState reads which of the PHP bot's cron jobs were switched on for

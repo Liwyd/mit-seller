@@ -3,8 +3,8 @@ package panels
 import (
 	"time"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 // MikroTik User Manager over the REST API with basic auth.

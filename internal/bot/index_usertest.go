@@ -5,7 +5,7 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
+	"github.com/Liwyd/mit-seller/internal/php"
 )
 
 func randomInt(min, max int64) int64 {

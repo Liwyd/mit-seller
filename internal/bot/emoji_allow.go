@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"regexp"
 
-	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
-	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
+	"github.com/Liwyd/mit-seller/internal/db"
+	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
-// Premium emoji allow-list. Nexra Panel's owner chooses which emoji packs the
-// bots may use and pushes their emoji ids here (nexra_kv "emoji_allowed").
+// Premium emoji allow-list. Mit Panel's owner chooses which emoji packs the
+// bots may use and pushes their emoji ids here (mit_kv "emoji_allowed").
 // Unset means no restriction (as before the panel managed it); once set,
 // only those emoji are kept, as button icons or inside texts.
 
@@ -35,7 +35,7 @@ func EmojiAllowList(d *db.DB) (map[string]bool, bool) {
 // SetEmojiAllowList stores the allowed ids; restricted=false lifts the limit.
 func SetEmojiAllowList(d *db.DB, ids []string, restricted bool) {
 	if !restricted {
-		d.Exec("DELETE FROM nexra_kv WHERE k = ?", emojiAllowKey)
+		d.Exec("DELETE FROM mit_kv WHERE k = ?", emojiAllowKey)
 		return
 	}
 	clean := []string{}

@@ -21,7 +21,7 @@ type Config struct {
 	AdminID     string // $adminnumber
 	Domain      string // $domainhosts (host and optional path, no scheme, no trailing /)
 	BotUsername string // $usernamebot
-	NexraSecret string // NEXRA_SECRET_CODE
+	MitSecret   string // MIT_SECRET (NEXRA_SECRET_CODE before the rebrand)
 
 	DBHost   string
 	DBPort   string
@@ -82,6 +82,23 @@ func parseFile(path string) (map[string]string, error) {
 	return out, sc.Err()
 }
 
+// Environment overrides are read as MITSELLER_<KEY>; the pre-rebrand
+// NEXRABOT_<KEY> spelling is still accepted so an existing setup (systemd
+// units, install.sh, test scripts) keeps working after an upgrade.
+const (
+	envPrefix       = "MITSELLER_"
+	legacyEnvPrefix = "NEXRABOT_"
+)
+
+// legacyKey is the pre-rebrand name of a setting in the config file. Files
+// written by the old binary are read as they are, without being rewritten.
+func legacyKey(k string) string {
+	if k == "MIT_SECRET" {
+		return "NEXRA_SECRET"
+	}
+	return k
+}
+
 // Load reads path (may be empty to use only the environment).
 func Load(path string) (*Config, error) {
 	vals := map[string]string{}
@@ -93,11 +110,24 @@ func Load(path string) (*Config, error) {
 		vals = v
 	}
 	get := func(k, def string) string {
-		if e, ok := os.LookupEnv("NEXRABOT_" + k); ok {
+		if e, ok := os.LookupEnv(envPrefix + k); ok {
+			return e
+		}
+		if lk := legacyKey(k); lk != k {
+			if e, ok := os.LookupEnv(legacyEnvPrefix + lk); ok {
+				return e
+			}
+		}
+		if e, ok := os.LookupEnv(legacyEnvPrefix + k); ok {
 			return e
 		}
 		if v, ok := vals[k]; ok && v != "" {
 			return v
+		}
+		if lk := legacyKey(k); lk != k {
+			if v, ok := vals[lk]; ok && v != "" {
+				return v
+			}
 		}
 		return def
 	}
@@ -107,7 +137,7 @@ func Load(path string) (*Config, error) {
 		AdminID:       get("ADMIN_ID", ""),
 		Domain:        strings.TrimRight(strings.TrimPrefix(strings.TrimPrefix(get("DOMAIN", ""), "https://"), "http://"), "/"),
 		BotUsername:   strings.TrimPrefix(get("BOT_USERNAME", ""), "@"),
-		NexraSecret:   get("NEXRA_SECRET", ""),
+		MitSecret:     get("MIT_SECRET", ""),
 		DBHost:        get("DB_HOST", "localhost"),
 		DBPort:        get("DB_PORT", "3306"),
 		DBSocket:      get("DB_SOCKET", ""),
@@ -120,7 +150,7 @@ func Load(path string) (*Config, error) {
 		TelegramAPI:   strings.TrimRight(get("TELEGRAM_API", "https://api.telegram.org"), "/"),
 		APIOwnerKey:   get("API_OWNER_KEY", ""),
 		APIManagerKey: get("API_MANAGER_KEY", ""),
-		DataDir:       get("DATA_DIR", "/var/lib/nexrabot"),
+		DataDir:       get("DATA_DIR", "/var/lib/mitseller"),
 		PublicURL:     strings.TrimRight(get("PUBLIC_URL", ""), "/"),
 		LegacyPHPDir:  get("LEGACY_PHP_DIR", ""),
 		DisableCrons:  get("DISABLE_CRONS", "0") == "1",
@@ -184,12 +214,12 @@ func RandomKey(n int) string {
 // Write stores the config in env format at path (0600).
 func (c *Config) Write(path string) error {
 	lines := []string{
-		"# nexrabot instance settings",
+		"# mitseller instance settings",
 		"BOT_TOKEN=" + c.BotToken,
 		"ADMIN_ID=" + c.AdminID,
 		"DOMAIN=" + c.Domain,
 		"BOT_USERNAME=" + c.BotUsername,
-		"NEXRA_SECRET=" + quote(c.NexraSecret),
+		"MIT_SECRET=" + quote(c.MitSecret),
 		"",
 		"DB_HOST=" + c.DBHost,
 		"DB_PORT=" + c.DBPort,
@@ -215,7 +245,7 @@ func (c *Config) Write(path string) error {
 		return err
 	}
 	// rewriting an existing config keeps its mode and group, so a service
-	// running as its own user (root:nexrabot 0640) can still read it
+	// running as its own user (root:mitseller 0640) can still read it
 	if st, err := os.Stat(path); err == nil {
 		_ = os.Chmod(tmp, st.Mode().Perm())
 		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
