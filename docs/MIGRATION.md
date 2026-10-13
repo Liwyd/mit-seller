@@ -79,6 +79,99 @@ mit-seller چنین چیدمانی را قبول نمی‌کند — نه آن�
 
 برای نصب‌های زیر مسیر یا Apache راه دستی هم هست: بخش «انتقال دستی» پایین‌تر.
 
+### سروری که با Apache سرو می‌شود (رایج‌ترین چیدمان mirzapanel)
+
+نصب‌های آماده‌ی mirzapanel معمولاً با **Apache + mod_php** کار می‌کنند، همه‌ی ربات‌ها را زیر یک مسیر مثل `domain/bot` سرو می‌کنند و
+`php-fpm` هم خاموش است. mit-seller با nginx کار می‌کند، پس قبل از انتقال باید وب‌سرور یک بار عوض شود. این کار **یک بار** انجام
+می‌شود و بعد همه‌ی انتقال‌ها (و ربات‌های بعدی) با همان `bash install.sh migrate` معمولی می‌روند؛ هیچ کد اضافه‌ای لازم نیست.
+
+نکته‌ی مهم: در این چیدمان، دامنه‌ی هر ربات جدا از بقیه است (`myrobot.example.com/bot1`، `shop.example.com/bot2`، …)، فقط مسیر
+مشترک است. پس هر ربات بعد از انتقال سایت خودش را با `root` همان پوشه می‌گیرد و آدرس‌اش از `domain/bot1/index.php` به
+`domain/index.php` می‌رسد. چون درگاه آنلاینی (با IPN) در این نصب‌ها معمولاً روشن نیست و متن‌های کاربر هم آدرس دامنه ندارند، این
+تغییر آدرس فقط یک ثبت‌جدد وبهوک است و کاربر چیزی حس نمی‌کند.
+
+**۰. بکاپ کامل** (بدون این مرحله هیچ کدام از مراحل پایین را اجرا نکنید):
+
+```bash
+TS=$(date +%Y%m%d_%H%M%S); B=/root/pre-migration-backup-$TS; mkdir -p "$B"
+for db in $(mysql -N -e 'SHOW DATABASES;' | grep -Ev '^(information_schema|mysql|performance_schema|sys|phpmyadmin)$'); do
+  mysqldump --single-transaction --quick --routines --triggers --default-character-set=utf8mb4 "$db" | gzip > "$B/$db.sql.gz"
+done
+crontab -l > "$B/root.crontab" 2>/dev/null || true
+crontab -u www-data -l > "$B/www-data.crontab" 2>/dev/null || true
+tar czf "$B/apache-etc.tar.gz" /etc/apache2
+```
+
+**۱. nginx و php-fpm را نصب و راه‌اندازی کنید** (Apache را هنوز دست نزنید):
+
+```bash
+apt-get install -y nginx php-fpm          # نسخه‌ی PHP را با `php -v` و پوشه‌ی /run/php/ هماهنگ کنید
+```
+
+**۲. برای هر ربات یک سایت nginx با ریشه‌ی همان پوشه بسازید.** برای رباتی که `config.php`اش در `/var/www/html/mirzabotconfig` و
+دامنه‌اش `myrobot.example.com` است:
+
+```nginx
+server {
+    listen 80;
+    server_name myrobot.example.com;
+    root /var/www/html/mirzabotconfig;
+    index index.php;
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:/run/php/php8.4-fpm.sock;   # سوکتِ واقعیِ سرور خودتان
+    }
+}
+```
+
+(برای هر ربات همین را با `server_name` و `root` خودش؛ گواهی SSL را با certbot بعداً بگیرید یا از همان `/etc/letsencrypt/live/...`
+که Apache استفاده می‌کرد در بلوک `listen 443 ssl` استفاده کنید.) بعد حتماً `nginx -t` بزنید.
+
+**۳. `$domainhosts` را در `config.php` هر ربات از `دامنه/مسیر` به `دامنه` تغییر دهید** (با بکاپ)، تا آدرس وبهوک و هر لینکی که
+خودِ ربات می‌سازد با چیدمان تازه هم‌خوان باشد:
+
+```bash
+cp /var/www/html/mirzabotconfig/config.php /root/config.php.bak
+sed -i "s|\$domainhosts = 'myrobot.example.com/mirzabotconfig';|\$domainhosts = 'myrobot.example.com';|" \
+  /var/www/html/mirzabotconfig/config.php
+```
+
+**۴. جابه‌جایی وب‌سرور** — فقط در این لحظه چند ثانیه وبهوک‌های قدیمی جواب نمی‌دهند (تلگرام خودش دوباره می‌فرستد). Apache را
+خاموش نکنید؛ فقط پورتش را عوض کنید تا برگشت سریع باشد:
+
+```bash
+cp -a /etc/apache2 /root/apache2.bak-before-nginx
+sed -i 's/^Listen 80$/Listen 127.0.0.1:8080/; s/^Listen 443$/Listen 127.0.0.1:8443/' /etc/apache2/ports.conf
+systemctl reload apache2
+systemctl restart nginx
+```
+
+حالا nginx روی ۸۰/۴۴۳ است و Apache فقط روی لوکال‌هاست (برای برگشت). بلافاصله وبهوک هر ربات را با آدرس تازه دوباره ثبت کنید:
+
+```bash
+for b in bot1 bot2 bot3; do : ; done   # برای هر ربات:
+curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://myrobot.example.com/index.php"
+```
+
+هر ربات را با `/index.php` و `/healthz` روی دامنه‌ی تازه امتحان کنید. اگر جواب نداد، برگردید:
+`cp -a /root/apache2.bak-before-nginx/* /etc/apache2/ && systemctl restart nginx apache2`.
+
+**۵. حالا هر ربات را مثل همیشه منتقل کنید** — nginx از قبل سر جایش است، پس همان دستور آشنا کار می‌کند و هر انتقال بدون قطعی
+انجام می‌شود:
+
+```bash
+PHP_DIR=/var/www/html/mirzabotconfig bash install.sh migrate
+PHP_DIR=/var/www/html/lotfi          bash install.sh migrate
+PHP_DIR=/var/www/html/abol           bash install.sh migrate
+```
+
+`migrate` خودش شماره‌ی خالی را انتخاب می‌کند، دیتابیس را بکاپ و ارتقا می‌دهد، ربات Go را آزمایش می‌کند و فقط اگر سالم بود nginx را
+از php-fpm به Go می‌برد؛ اگر جایی خطا بدهد همان ربات به حالت قبلی خودش برمی‌گردد و بقیه اصلاً دست نمی‌خورند. خطوط کرونِ همان
+دامنه هم خودش از crontab برداشته می‌شود.
+
+**۶. بعد از همه‌ی انتقال‌ها:** Apache دیگر لازم نیست (`systemctl disable --now apache2`)، ولی تا چند روز نگهش دارید. گواهی‌ها را با
+acme.sh/certbot حالا برای nginx تمدید کنید، وگرنه بعد از انقضا `https://` از کار می‌افتد.
+
 ### کد مخفی (`MIT_SECRET`)
 
 ربات Go کد مخفی خودش را از `config.php` می‌خواند؛ mirza_pro چنین چیزی ندارد و بدون آن، قفل مدیریت پنل بسته می‌شود. پس اسکریپت:

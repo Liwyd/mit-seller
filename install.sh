@@ -899,7 +899,7 @@ cmd_migrate() {
 
     [ -f "$PHP_DIR/config.php" ] || die "$PHP_DIR/config.php not found (set PHP_DIR=)"
     command -v nginx >/dev/null || die "nginx is not installed"
-    SITE=$(nginx_site_for "$PHP_DIR") || die "no nginx site serves $PHP_DIR with php-fpm. The mirzapanel and mirza_pro installers put every bot behind one Apache site on a path, which mit-seller does not proxy; give this bot its own nginx site with \"root $PHP_DIR;\" and run this again (see docs/MIGRATION.md)"
+    SITE=$(nginx_site_for "$PHP_DIR") || die "no nginx site serves $PHP_DIR with php-fpm. The mirzapanel and mirza_pro installers put every bot behind one Apache site on a path; on such a server put nginx in front first with \"root $PHP_DIR;\" (docs/MIGRATION.md, section «سروری که با Apache سرو می‌شود») and run this again"
     # dry-run the nginx rewrite on a copy, so an unusual layout stops us here
     cp "$SITE" "/tmp/mitseller-site-check.$$"
     rewrite_nginx_site "/tmp/mitseller-site-check.$$" "$N" || { rm -f "/tmp/mitseller-site-check.$$"; die "$SITE has a layout this script can't rewrite safely; migrate by hand (see docs/MIGRATION.md)"; }
@@ -920,7 +920,7 @@ cmd_migrate() {
         # the config is taken back out, so a bot number is not left claimed
         # by a bot that was never migrated
         rm -f "$CFG"
-        die "the PHP bot is served under a path ($PHP_DIR/config.php says \$domainhosts = \"$DOMAIN\"). mit-seller needs a site that serves this bot at its own domain root, so set up an nginx site for $PHP_DIR and run this again (see docs/MIGRATION.md)"
+        die "the PHP bot is served under a path ($PHP_DIR/config.php says \$domainhosts = \"$DOMAIN\"). mit-seller needs a site that serves this bot at its own domain root. On an Apache server (the usual mirzapanel layout) put nginx in front first — docs/MIGRATION.md, section «سروری که با Apache سرو می‌شود» — then run this again"
         ;;
     esac
 
