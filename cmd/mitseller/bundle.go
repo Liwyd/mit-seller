@@ -72,6 +72,44 @@ func dumpSQLGz(cfg *config.Config, w io.Writer) error {
 	return runErr
 }
 
+// writeDumpToTar adds the database dump to the bundle as dump.sql.gz, the name
+// cmdImportBundle looks for. A tar entry's size has to be known before the
+// header is written, so the dump is staged in a temporary file first and then
+// copied in. Streaming straight into the tar writer (what this used to do)
+// leaves the writer with no current entry, so every write is rejected and
+// mysqldump dies with EPIPE — export-bundle failed for every bot.
+func writeDumpToTar(cfg *config.Config, tw *tar.Writer) error {
+	staged, err := os.CreateTemp("", "mitseller-dump-*.sql.gz")
+	if err != nil {
+		return err
+	}
+	name := staged.Name()
+	defer os.Remove(name)
+	if err := dumpSQLGz(cfg, staged); err != nil {
+		staged.Close()
+		return err
+	}
+	if err := staged.Close(); err != nil {
+		return err
+	}
+	info, err := os.Stat(name)
+	if err != nil {
+		return err
+	}
+	src, err := os.Open(name)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	if err := tw.WriteHeader(&tar.Header{
+		Name: "dump.sql.gz", Mode: 0600, Size: info.Size(), ModTime: time.Now(),
+	}); err != nil {
+		return err
+	}
+	_, err = io.Copy(tw, src)
+	return err
+}
+
 // cmdExportBundle packs a bot up so it can be installed on another server. It
 // reads the source without changing it: the PHP bot (or the Go bot) keeps
 // running, keeps its crontab and keeps its nginx site. The bundle holds the
@@ -180,7 +218,7 @@ func cmdExportBundle(args []string) {
 			die("%v", err)
 		}
 	}
-	if err := dumpSQLGz(cfg, tw); err != nil {
+	if err := writeDumpToTar(cfg, tw); err != nil {
 		os.Remove(tmp)
 		die("dump failed: %v", err)
 	}

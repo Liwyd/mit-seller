@@ -5,10 +5,13 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Liwyd/mit-seller/internal/config"
 )
 
 // writeBundle builds a .tar.gz in memory holding the given name->content
@@ -168,5 +171,63 @@ func TestUntarBundleSkipsNonRegularEntries(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ok.txt")); err != nil {
 		t.Errorf("the regular file should still be unpacked: %v", err)
+	}
+}
+
+// export-bundle must put the database in the bundle as dump.sql.gz, which is
+// the name cmdImportBundle looks for. A tar entry's size has to be known
+// before its header is written, so the dump is staged and then copied in.
+// Streaming it straight into the tar writer (what this used to do) left the
+// writer with no current entry, so every write was rejected and mysqldump
+// died with EPIPE: export-bundle failed for every single bot, and nothing
+// noticed because the shell tests drive a fake binary that never dumps.
+func TestWriteDumpToTarProducesAReadableDumpSQLGz(t *testing.T) {
+	// a mysqldump that writes known bytes and exits 0, so the test needs no
+	// database: dumpSQLGz only shells out to it
+	bin := t.TempDir()
+	fake := filepath.Join(bin, "mysqldump")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho '-- fake dump'\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cfg := &config.Config{DBUser: "u", DBPass: "p", DBName: "db", DBHost: "localhost", DBPort: "3306"}
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	if err := writeDumpToTar(cfg, tw); err != nil {
+		t.Fatalf("writeDumpToTar: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("closing tar: %v", err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatalf("closing gzip: %v", err)
+	}
+
+	// read it back the way the importer does
+	dir := t.TempDir()
+	path := filepath.Join(t.TempDir(), "b.tar.gz")
+	if err := os.WriteFile(path, buf.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := untarBundle(path, dir); err != nil {
+		t.Fatalf("untarBundle: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "dump.sql.gz"))
+	if err != nil {
+		t.Fatalf("the bundle must contain dump.sql.gz: %v", err)
+	}
+	r, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("dump.sql.gz is not readable gzip: %v", err)
+	}
+	body, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "-- fake dump") {
+		t.Errorf("dump.sql.gz does not hold the dump: %q", body)
 	}
 }
