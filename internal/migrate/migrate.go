@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -56,7 +57,7 @@ func ReadPHPConfig(path string) (*config.Config, error) {
 	c := &config.Config{
 		BotToken:    vars["APIKEY"],
 		AdminID:     vars["adminnumber"],
-		Domain:      strings.TrimRight(vars["domainhosts"], "/"),
+		Domain:      stripScheme(vars["domainhosts"]),
 		BotUsername: strings.TrimPrefix(vars["usernamebot"], "@"),
 		MitSecret:   firstDef(defs, "MIT_SECRET_CODE", "NEXRA_SECRET_CODE"),
 		DBHost:      "localhost",
@@ -88,56 +89,209 @@ func firstDef(defs map[string]string, keys ...string) string {
 	return ""
 }
 
-// CronState reads which of the PHP bot's cron jobs were switched on for
-// domain (the admin menu added/removed crontab lines).
-func CronState(domain string) (map[string]bool, string) {
+// stripScheme drops a scheme and a trailing slash from a host, because the Go
+// config stores a bare host and every crontab/nginx probe below matches on
+// "://<domain>/". A PHP config that wrote "https://bot.example.com/" would
+// otherwise match nothing, and the migration would leave the PHP crons in
+// place to fight the Go bot's own scheduler.
+func stripScheme(s string) string {
+	s = strings.TrimRight(strings.TrimSpace(s), "/")
+	for _, p := range []string{"https://", "http://"} {
+		if strings.HasPrefix(strings.ToLower(s), p) {
+			s = s[len(p):]
+			break
+		}
+	}
+	return strings.TrimRight(s, "/")
+}
+
+// cronDirs are the two script directories the PHP bots put their crontab
+// lines under. mirzapanel and nexra used /cron/; mirza_pro used /cronbot/.
+var cronDirs = []string{"/cron/", "/cronbot/"}
+
+// goCronScripts are the PHP cron scripts the Go bot reimplements itself. A
+// crontab line calling one of these is dropped on migration, because the Go
+// bot runs that job from its own scheduler. Any other script is left in the
+// crontab and reported: the Go bot has no equivalent for it, and silently
+// stopping somebody's backup or uptime job would be worse than leaving it.
+var goCronScripts = map[string]bool{
+	"configtest.php":         true, // → CronOn("test")
+	"cronvolume.php":         true, // → CronOn("volume")
+	"cronday.php":            true, // → CronOn("time")
+	"removeexpire.php":       true, // → CronOn("remove")
+	"croncard.php":           true, // → CronOn("card")
+	"sendmessage.php":        true, // always on in Go
+	"NoticationsService.php": true, // mirza_pro: volume + day + remove in one
+}
+
+// cronURL reports whether a crontab line calls one of this domain's cron
+// scripts. The domain is anchored behind "://" so that example.com never
+// matches a line belonging to evil-example.com or sub.example.com — a bare
+// strings.Contains would both switch on a stranger's job and, worse, delete
+// that line during the cutover.
+func cronURL(line, domain string) (string, bool) {
+	for _, dir := range cronDirs {
+		if i := strings.Index(line, "://"+domain+dir); i >= 0 {
+			rest := line[i+len("://"+domain+dir):]
+			if j := strings.IndexAny(rest, " ?\"'"); j >= 0 {
+				rest = rest[:j]
+			}
+			return rest, true
+		}
+	}
+	return "", false
+}
+
+// readCrontab returns the calling user's crontab. An empty table (the usual
+// case on a box that never had a PHP bot) is not an error; a failure to run
+// crontab at all is, so the caller can tell "no crontab" from "could not
+// read the crontab" and refuse rather than migrate blind.
+func readCrontab() (string, error) {
 	out, err := exec.Command("crontab", "-l").Output()
 	if err != nil {
-		return map[string]bool{}, ""
+		var ee *exec.ExitError
+		if errors.As(err, &ee) || errors.Is(err, exec.ErrNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("reading the crontab: %w", err)
 	}
-	tab := string(out)
-	has := func(file string) bool {
+	return string(out), nil
+}
+
+// mirzaCronFlags reads mirza_pro's setting.cron_status, the JSON object its
+// admin menu writes and every /cronbot/ script checks before doing anything.
+// nexra and mirzapanel kept these switches in the crontab itself, so this is
+// only meaningful for the mirza_pro flavour.
+func mirzaCronFlags(d *db.DB) map[string]bool {
+	if d == nil {
+		return map[string]bool{}
+	}
+	return parseMirzaCronFlags(d.Setting().S("cron_status"))
+}
+
+// parseMirzaCronFlags decodes the cron_status blob. mirza_pro wrote its
+// booleans as JSON true/false, but an operator who edited the row by hand
+// could have left "1"/"0" or "true"/"false" behind, so those are accepted too.
+func parseMirzaCronFlags(raw string) map[string]bool {
+	out := map[string]bool{}
+	if strings.TrimSpace(raw) == "" {
+		return out
+	}
+	var m map[string]any
+	if json.Unmarshal([]byte(raw), &m) != nil {
+		return out
+	}
+	for k, v := range m {
+		switch t := v.(type) {
+		case bool:
+			out[k] = t
+		case string:
+			out[k] = t == "1" || strings.EqualFold(t, "true")
+		case float64:
+			out[k] = t != 0
+		}
+	}
+	return out
+}
+
+// CronState reads which of the PHP bot's cron jobs were switched on.
+//
+// nexra and mirzapanel turned a job on by adding a curl line to the crontab,
+// so the table itself is the record. mirza_pro moved the switches into
+// setting.cron_status and gates every /cronbot/ script on that JSON, so the
+// crontab only tells you whether croncard.php — the one script with no gate —
+// was scheduled at all. Reading mirza_pro's state from the crontab would
+// enable the wrong jobs: statusday.php is a sales report, not the expiry job,
+// and disableconfig.php only deactivates already-flagged configs.
+func CronState(domain string, flavor Flavor, d *db.DB) (map[string]bool, string, error) {
+	tab, err := readCrontab()
+	if err != nil {
+		return nil, "", err
+	}
+	inTable := func(file string) bool {
 		for _, line := range strings.Split(tab, "\n") {
 			l := strings.TrimSpace(line)
-			if strings.HasPrefix(l, "#") {
+			if l == "" || strings.HasPrefix(l, "#") {
 				continue
 			}
-			if strings.Contains(l, domain+"/cron/"+file) {
+			if script, ok := cronURL(l, domain); ok && script == file {
 				return true
 			}
 		}
 		return false
 	}
-	return map[string]bool{
-		"test":   has("configtest.php"),
-		"volume": has("cronvolume.php"),
-		"time":   has("cronday.php"),
-		"remove": has("removeexpire.php"),
-		"card":   has("croncard.php"),
-	}, tab
+	state := map[string]bool{}
+	if flavor == FlavorMirza {
+		f := mirzaCronFlags(d)
+		state["test"] = f["test"]
+		state["volume"] = f["volume"]
+		state["time"] = f["day"]
+		state["remove"] = f["remove"]
+		// cron_status has no "card" key and croncard.php has no gate, so the
+		// crontab is still the only record of that one.
+		state["card"] = inTable("croncard.php")
+		return state, tab, nil
+	}
+	for _, f := range []struct{ name, file string }{
+		{"test", "configtest.php"},
+		{"volume", "cronvolume.php"},
+		{"time", "cronday.php"},
+		{"remove", "removeexpire.php"},
+		{"card", "croncard.php"},
+	} {
+		state[f.name] = inTable(f.file)
+	}
+	return state, tab, nil
 }
 
-// RemoveCronLines drops this domain's /cron/*.php lines from the crontab
-// (the Go bot runs those jobs itself). The old crontab is returned so it can
-// be restored on rollback.
-func RemoveCronLines(domain string) (string, error) {
-	_, tab := CronState(domain)
-	if tab == "" {
-		return "", nil
+// cronScriptName pulls the script basename out of a crontab line, or "".
+func cronScriptName(line string) string {
+	for _, dir := range cronDirs {
+		if i := strings.Index(line, dir); i >= 0 {
+			rest := line[i+len(dir):]
+			if j := strings.IndexAny(rest, " ?\"'"); j >= 0 {
+				rest = rest[:j]
+			}
+			return rest
+		}
 	}
-	var keep []string
+	return ""
+}
+
+// RemoveCronLines drops the cron lines this domain ran for jobs the Go bot
+// now runs itself, and leaves everything else in place. The old crontab is
+// returned so it can be restored on rollback; the scripts that were left
+// behind are returned too, so the operator is told which PHP jobs keep
+// running alongside the Go bot.
+func RemoveCronLines(domain string) (tab string, kept []string, err error) {
+	tab, err = readCrontab()
+	if err != nil {
+		return "", nil, err
+	}
+	if tab == "" {
+		return "", nil, nil
+	}
+	var keep, drop []string
 	for _, line := range strings.Split(tab, "\n") {
-		if strings.Contains(line, domain+"/cron/") && strings.Contains(line, "curl") {
+		script, isOurs := cronURL(line, domain)
+		if isOurs && goCronScripts[script] {
+			drop = append(drop, script)
 			continue
+		}
+		if isOurs {
+			kept = append(kept, script)
 		}
 		keep = append(keep, line)
 	}
+	if len(drop) == 0 {
+		return tab, kept, nil
+	}
 	cmd := exec.Command("crontab", "-")
 	cmd.Stdin = strings.NewReader(strings.Join(keep, "\n"))
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return tab, fmt.Errorf("crontab: %v %s", err, out)
+	if out, cerr := cmd.CombinedOutput(); cerr != nil {
+		return tab, kept, fmt.Errorf("crontab: %v %s", cerr, out)
 	}
-	return tab, nil
+	return tab, kept, nil
 }
 
 // ---------------------------------------------------------------- SQL import
@@ -244,23 +398,20 @@ func (s *splitter) next() (string, error) {
 	}
 }
 
-func lastLine(s string) string {
-	s = strings.TrimRight(s, "\n")
-	if i := strings.LastIndex(s, "\n"); i >= 0 {
-		return s[i+1:]
-	}
-	return s
-}
-
 // ImportSQL loads a mysqldump (.sql or .sql.gz) into d. Unless force is
 // set it refuses when the database already holds users, so a live bot is
 // never overwritten by mistake.
 func ImportSQL(d *db.DB, path string, force bool, progress func(n int)) error {
 	if !force {
 		var n int64
-		if err := d.QueryRow("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'user'").Scan(&n); err == nil && n > 0 {
+		if err := d.QueryRow("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'user'").Scan(&n); err != nil {
+			return fmt.Errorf("checking whether the database already has users: %w", err)
+		}
+		if n > 0 {
 			var users int64
-			_ = d.QueryRow("SELECT COUNT(*) FROM user").Scan(&users)
+			if err := d.QueryRow("SELECT COUNT(*) FROM user").Scan(&users); err != nil {
+				return fmt.Errorf("counting the users already in the database: %w", err)
+			}
 			if users > 0 {
 				return fmt.Errorf("the database already has %d users; pass --force to overwrite it", users)
 			}

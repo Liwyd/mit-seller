@@ -23,3 +23,7 @@ jobs:
         run: bash -n install.sh
       - name: Installer tests
         run: bash tests/install/legacy_adopt_test.sh
+      - name: Migration tests (mirzapanel, additional bots, mirza_pro)
+        run: bash tests/install/migrate_mirza_test.sh
+      - name: Cross-server move tests (bot-export/import/cutover)
+        run: bash tests/install/bot_move_test.sh

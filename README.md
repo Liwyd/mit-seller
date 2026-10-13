@@ -37,16 +37,31 @@ bash /root/mitseller-install.sh all
 ```bash
 curl -sLo install.sh https://raw.githubusercontent.com/Liwyd/mit-seller/main/install.sh
 N=7 bash install.sh migrate        # برای ربات /var/www/html/botmirzapanel7
+PHP_DIR=/var/www/html/myshop bash install.sh migrate    # شماره لازم نیست
 ```
 
+منابع پشتیبانی‌شده: **nexra-mirzabot**، **mirzapanel** (با ربات‌های تکمیلی‌اش) و **mirza_pro** — تشخیص از روی محتوای پوشه است، پس
+`migrate-all` همه را پیدا می‌کند. هر ربات باید سایت nginx خودش را با `root` همان پوشه داشته باشد (نصب‌های زیر مسیر یا Apache رد
+می‌شوند و دلیلش گفته می‌شود). برای پوشه‌های بیرون از `/var/www/html`: `MIGRATE_DIRS='/srv/bots/a:/srv/bots/b' bash install.sh migrate-all`.
+
 اسکریپت قبل از هر تغییری از دیتابیس بکاپ می‌گیرد، ربات Go را آزمایشی بالا می‌آورد، و فقط اگر همه‌چیز سالم بود nginx را از php-fpm به Go
-می‌برد. اگر هر مرحله‌ای خطا بدهد، خودش همه‌چیز را به حالت PHP برمی‌گرداند. جزئیات و نکته‌ها: [docs/MIGRATION.md](docs/MIGRATION.md).
+می‌برد. اگر هر مرحله‌ای خطا بدهد، خودش همه‌چیز را به حالت PHP برمی‌گرداند. جزئیات، نکته‌های mirza_pro و کد مخفی: [docs/MIGRATION.md](docs/MIGRATION.md).
 
 بازگشت به PHP در هر زمان:
 
 ```bash
 N=7 bash install.sh rollback
 ```
+
+انتقال یک رباتِ در حال اجرا از سرور دیگر (بدون قطعی، بدون دوباره‌پیام‌دادن):
+
+```bash
+# سرور قبلی:  PHP_DIR=/var/www/html/bot7 bash install.sh bot-export   (یا N=7 برای Go)
+# سرور جدید:  FILE=/root/bundle.tar.gz bash install.sh bot-import
+# بعد از اینکه DNS به سرور جدید اشاره کرد:  N=1 bash install.sh bot-cutover
+```
+
+جزئیات و برگشت: [docs/MIGRATION.md](docs/MIGRATION.md).
 
 به‌روزرسانی همه‌ی ربات‌های Go روی سرور به آخرین نسخه:
 
@@ -91,6 +106,8 @@ mitseller check        -c …                         آزمایش دیتابی�
 mitseller set-webhook  -c …                         تنظیم وبهوک (با توکن مخفی)
 mitseller keys         -c …                         کلیدهای API برای Mit Panel
 mitseller autopay-test -c … parse|status|send …     آزمایش تشخیص پیامک بانک
+mitseller export-bundle --php-dir … --out …         بسته‌بندی ربات برای انتقال بین دو سرور
+mitseller import-bundle --file … --out …            خواندن بسته و ساخت تنظیمات (خاموش، تا bot-cutover)
 ```
 
 لاگ: `journalctl -u mitseller@7 -f`

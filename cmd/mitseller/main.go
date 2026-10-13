@@ -8,6 +8,8 @@
 //	mitseller keys         -c /etc/mitseller/bot7.env
 //	mitseller check        -c /etc/mitseller/bot7.env
 //	mitseller db-dump      -c /etc/mitseller/bot7.env --out /root/bot7.sql.gz
+//	mitseller export-bundle --php-dir /var/www/html/mirzabot --out /root/bot.tar.gz
+//	mitseller import-bundle --file /root/bot.tar.gz --out /etc/mitseller/bot7.env --db-name mitseller7 --db-user mitseller7user
 //	mitseller autopay-test -c ... parse | status | send <amount> | send-raw <text>
 package main
 
@@ -55,6 +57,8 @@ commands:
   init-config   write a config file for a new bot (used by install.sh)
   panel-register connect this bot to Mit Panel and give it to its owner
   db-dump       back up the bot's database (mysqldump, gzipped)
+  export-bundle pack a bot (PHP or Go) up so another server can install it
+  import-bundle unpack a bundle: write the config and load the database
   autopay-test  check the bank SMS parser / simulate a deposit
   admin-ids     print the bot admins' Telegram ids (main admin first)
   version       print the version`)
@@ -87,6 +91,10 @@ func main() {
 		cmdPanelRegister(args)
 	case "db-dump":
 		cmdDump(args)
+	case "export-bundle":
+		cmdExportBundle(args)
+	case "import-bundle":
+		cmdImportBundle(args)
 	case "autopay-test":
 		cmdAutopayTest(args)
 	case "admin-ids":
@@ -190,23 +198,63 @@ func cmdMigrate(args []string) {
 	out := fs.String("out", "", "config file to write (e.g. /etc/mitseller/bot7.env)")
 	listen := fs.String("listen", "127.0.0.1:8080", "address the Go bot will listen on")
 	dataDir := fs.String("data-dir", "/var/lib/mitseller", "data directory")
-	cleanCron := fs.Bool("clean-crontab", true, "remove this bot's /cron/*.php crontab lines (the Go bot runs them itself)")
+	cleanCron := fs.Bool("clean-crontab", true, "remove this bot's cron crontab lines (the Go bot runs them itself)")
 	skipDB := fs.Bool("skip-db", false, "only write the config; do not touch the database or the crontab")
+	flavor := fs.String("flavor", "auto", "which PHP product the directory came from: auto, nexra/mirzapanel or mirza_pro")
+	reportPath := fs.String("report", "", "file to write the migration report to (default: next to --out)")
 	_ = fs.Parse(args)
 	if *dir == "" || *out == "" {
 		die("--php-dir and --out are required")
 	}
-	cfg, err := migrate.ReadPHPConfig(strings.TrimRight(*dir, "/") + "/config.php")
+	roots, err := migrate.DetectBotRoots([]string{*dir}, nil)
 	if err != nil {
 		die("%v", err)
 	}
-	cfg.Listen = *listen
-	cfg.DataDir = *dataDir
-	cfg.LegacyPHPDir = *dir
+	if len(roots) == 0 {
+		die("%s has no config.php", *dir)
+	}
+	phpDir, f := roots[0].Dir, roots[0].Flavor
+	switch *flavor {
+	case "auto":
+	case "legacy", "nexra", "mirzapanel", "nexra/mirzapanel":
+		f = migrate.FlavorLegacy
+	case string(migrate.FlavorMirza):
+		f = migrate.FlavorMirza
+	default:
+		die("--flavor must be auto, nexra, mirzapanel or mirza_pro")
+	}
+	cfg, err := migrate.ReadPHPConfig(phpDir + "/config.php")
+	if err != nil {
+		die("%v", err)
+	}
+	// An earlier run's config is read before the secret is minted, not after:
+	// minting first would print "store it now" for a value the next few lines
+	// then throw away in favour of the one the panel already knows.
 	if old, err := config.Load(*out); err == nil && old.APIOwnerKey != "" {
 		// re-running keeps the keys Mit Panel already uses
 		cfg.APIOwnerKey, cfg.APIManagerKey, cfg.WebhookSecret = old.APIOwnerKey, old.APIManagerKey, old.WebhookSecret
+		if old.MitSecret != "" {
+			cfg.MitSecret = old.MitSecret
+		}
 	}
+	if cfg.MitSecret == "" {
+		// mirzapanel and mirza_pro never wrote a secret into config.php.
+		// Panel management is gated on it, so a fresh one is minted here and
+		// shown once; MIT_SECRET in the environment is used when given.
+		cfg.MitSecret = os.Getenv("MIT_SECRET")
+		if cfg.MitSecret == "" {
+			cfg.MitSecret = config.RandomKey(32)
+			fmt.Println()
+			fmt.Println("  MIT_SECRET was not set in the PHP bot's config.php, so one was generated for this bot.")
+			fmt.Println("  Store it now — it is what gates panel management from inside Telegram.")
+			fmt.Println()
+			fmt.Println("    MIT_SECRET=" + cfg.MitSecret)
+			fmt.Println()
+		}
+	}
+	cfg.Listen = *listen
+	cfg.DataDir = *dataDir
+	cfg.LegacyPHPDir = phpDir
 	if cfg.APIOwnerKey == "" {
 		cfg.APIOwnerKey = config.RandomKey(24)
 		cfg.APIManagerKey = config.RandomKey(24)
@@ -222,6 +270,7 @@ func cmdMigrate(args []string) {
 		return
 	}
 
+	rep := &migrate.Report{}
 	d, err := db.Open(cfg.DSN())
 	if err != nil {
 		die("database (check the credentials in %s): %v", *out, err)
@@ -229,7 +278,13 @@ func cmdMigrate(args []string) {
 	if err := d.EnsureSchema(cfg.AdminID, func(s string) { fmt.Println("  schema:", s) }); err != nil {
 		die("schema: %v", err)
 	}
-	crons, _ := migrate.CronState(cfg.Domain)
+	if err := migrate.ApplyCompat(d, f, rep); err != nil {
+		die("adapting the database: %v", err)
+	}
+	crons, _, err := migrate.CronState(cfg.Domain, f, d)
+	if err != nil {
+		die("%v", err)
+	}
 	for name, on := range crons {
 		v := "0"
 		if on {
@@ -241,12 +296,42 @@ func cmdMigrate(args []string) {
 	}
 	fmt.Printf("cron switches carried over: %v\n", crons)
 	if *cleanCron {
-		if old, err := migrate.RemoveCronLines(cfg.Domain); err != nil {
-			fmt.Println("warning:", err)
-		} else if old != "" {
-			_ = os.WriteFile(strings.TrimSuffix(*out, ".env")+".crontab.bak", []byte(old), 0600)
-			fmt.Println("old /cron/*.php crontab lines removed (backup next to the config)")
+		oldTab, kept, err := migrate.RemoveCronLines(cfg.Domain)
+		if err != nil {
+			rep.Warn = append(rep.Warn, "crontab: "+err.Error())
+		} else if oldTab != "" {
+			bak := strings.TrimSuffix(*out, ".env") + ".crontab.bak"
+			if _, statErr := os.Stat(bak); statErr == nil {
+				// the original is already saved; overwriting it now would
+				// replace the pre-migration table with the cleaned one and
+				// leave rollback nothing to restore
+				rep.Info = append(rep.Info, "old cron crontab lines removed (backup kept from the first run)")
+			} else if err := os.WriteFile(bak, []byte(oldTab), 0600); err != nil {
+				rep.Warn = append(rep.Warn, "crontab: could not write the backup "+bak+": "+err.Error())
+			} else {
+				rep.Info = append(rep.Info, "old cron crontab lines removed (backup next to the config)")
+			}
+			for _, s := range kept {
+				rep.Warn = append(rep.Warn, "crontab: "+s+" is left running — the Go bot has no job for it")
+			}
 		}
+	}
+	if cfg.MitSecret != "" {
+		rep.Info = append(rep.Info, "MIT_SECRET is set and panel management is unlocked")
+	}
+	path := *reportPath
+	if path == "" {
+		path = strings.TrimSuffix(*out, ".env") + ".migrate-report.txt"
+	}
+	if err := os.WriteFile(path, []byte(rep.String()), 0600); err != nil {
+		fmt.Println("warning: could not write the migration report:", err)
+	} else {
+		fmt.Println()
+		fmt.Print(rep.String())
+		fmt.Println("report written:", path)
+	}
+	if rep.HasFatal() {
+		die("the migration stopped; read the report above")
 	}
 	fmt.Println("done. Users, services, products, payments and settings stay exactly where they were.")
 }

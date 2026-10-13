@@ -237,6 +237,11 @@ func (c *Config) Write(path string) error {
 	if c.LegacyPHPDir != "" {
 		lines = append(lines, "LEGACY_PHP_DIR="+c.LegacyPHPDir)
 	}
+	// an imported bot is held with its crons off until the webhook is cut
+	// over, so it cannot message users while the old server still answers
+	if c.DisableCrons {
+		lines = append(lines, "DISABLE_CRONS=1")
+	}
 	if c.TelegramAPI != "" && c.TelegramAPI != "https://api.telegram.org" {
 		lines = append(lines, "TELEGRAM_API="+c.TelegramAPI)
 	}

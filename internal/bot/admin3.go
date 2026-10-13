@@ -596,7 +596,10 @@ func (b *Bot) ToggleSetting(typ, value string) {
 	}
 }
 
-// MigrateLegacySettings turns the old text-valued switches into 1/0.
+// MigrateLegacySettings turns the old text-valued switches into 1/0. nexra
+// and mirzapanel used Persian sentences, mirza_pro used words like
+// "botstatuson"; both are read here so an admin's status page shows the truth
+// on a database that came from either.
 func (b *Bot) MigrateLegacySettings() {
 	d := b.DB
 	s := d.Setting()
@@ -607,6 +610,14 @@ func (b *Bot) MigrateLegacySettings() {
 		{"help_Status", "✅ آموزش فعال است", "❌ آموزش غیرفعال است"},
 		{"get_number", "✅ تایید شماره موبایل روشن است", "❌ احرازهویت شماره تماس غیرفعال است"},
 		{"iran_number", "✅ احرازشماره ایرانی روشن است", "❌ بررسی شماره ایرانی غیرفعال است"},
+		// mirza_pro's wording
+		{"Bot_Status", "botstatuson", "botstatusoff"},
+		{"roll_Status", "rolleon", "rolloff"},
+		{"get_number", "onAuthenticationphone", "offAuthenticationphone"},
+		{"iran_number", "onAuthenticationiran", "offAuthenticationiran"},
+		{"statuscategory", "oncategory", "offcategory"},
+		{"status_verify", "onverify", "offverify"},
+		{"copy_cart", "oncopycart", "offcopycart"},
 	}
 	for _, p := range pairs {
 		switch s.S(p.col) {

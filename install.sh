@@ -8,6 +8,13 @@
 #
 #   Move a running PHP bot to Go (same database, same webhook, no downtime):
 #     N=7 bash install.sh migrate          # PHP_DIR=/var/www/html/botmirzapanel7 by default
+#     PHP_DIR=/var/www/html/mybot bash install.sh migrate   # N is then picked for you
+#
+#   It accepts a bot written by nexra, by mirzapanel or by mirza_pro. The bot
+#   must already be served by its own nginx site with "root <bot dir>;" — the
+#   mirzapanel and mirza_pro installers put every bot behind one Apache site
+#   on a path, which mit-seller does not proxy, so those installs migrate by
+#   hand (see docs/MIGRATION.md).
 #
 #   Undo a migration (back to PHP exactly as it was):
 #     N=7 bash install.sh rollback
@@ -23,8 +30,9 @@
 #   PHP bot to Go and connect each to the panel under its owner:
 #     bash /root/mitseller-install.sh all
 #
-#   Move EVERY PHP bot on this server (/var/www/html/botmirzapanel*) to Go,
-#   one by one, and connect each to Mit Panel under its owner:
+#   Move EVERY PHP bot on this server (one level under /var/www/html, plus
+#   whatever MIGRATE_DIRS names) to Go, one by one, and connect each to Mit
+#   Panel under its owner:
 #     curl -sLo /root/mitseller-install.sh <raw url of this file>
 #     MIT_PANEL_URL=https://panel.example.com/dashboard MIT_PANEL_USER=admin \
 #     MIT_PANEL_PASS='...' bash /root/mitseller-install.sh migrate-all
@@ -32,6 +40,8 @@
 #   Without the MIT_PANEL_* variables the Mit Panel on this server is
 #   used; with none, the bots are migrated but not connected (on the panel's
 #   server, "bash install.sh panel-link" prints the command for this one).
+#   A bot in another directory is added with MIGRATE_DIRS, colon separated:
+#     MIGRATE_DIRS=/srv/bots/extra1:/srv/bots/extra2 bash install.sh migrate-all
 #
 #   Convert a bot installed by the PRE-REBRAND installer (nexrabot@N) to this
 #   one — same number, port, database, domain, nginx site and panel keys, the
@@ -63,7 +73,9 @@ MITSELLER_BIN="${MITSELLER_BIN:-${NEXRABOT_BIN:-}}"
 MITSELLER_TELEGRAM_API="${MITSELLER_TELEGRAM_API:-${NEXRABOT_TELEGRAM_API:-}}"
 # Only what the bot itself reads is exported: an exported-but-empty variable
 # would beat the bot's own default (its Telegram API base URL, for one).
-export MIT_PANEL_URL MIT_PANEL_USER MIT_PANEL_PASS MIT_PANEL_INSECURE \
+# MIT_SECRET is exported too, so "migrate" can hand the same value to the Go
+# bot when the PHP bot never wrote one into its config.php.
+export MIT_SECRET MIT_PANEL_URL MIT_PANEL_USER MIT_PANEL_PASS MIT_PANEL_INSECURE \
        MIT_PANEL_IGNORE_IDS MITSELLER_BIN
 
 # legacy_units: the numbers of the pre-rebrand bots that are enabled or
@@ -205,6 +217,7 @@ EOF
 print_keys() { # N
     echo
     "$BIN" keys -c "$ETC/bot$1.env"
+    echo "secret:       $(sed -n 's/^MIT_SECRET=//p' "$ETC/bot$1.env" | tr -d '"')"
     echo
     echo "Mit Panel → Bot → افزودن ربات: address https://$(grep '^DOMAIN=' "$ETC/bot$1.env" | cut -d= -f2), and the two keys above."
 }
@@ -312,13 +325,51 @@ cmd_panel_update() {
     say "Mit Panel updated (previous image kept as $old)"
 }
 
-php_bots() { # numbers of the PHP bots on this server
-    local dir n
-    for dir in /var/www/html/botmirzapanel*/; do
-        n=${dir%/}; n=${n##*botmirzapanel}
-        case "$n" in ''|*[!0-9]*) continue ;; esac
-        [ -f "$dir/config.php" ] && echo "$n"
+# php_bot_dirs: every PHP bot directory this server holds — the ones named in
+# MIGRATE_DIRS (colon separated) first, then one level under /var/www/html. A
+# directory counts as a bot when its own config.php exists, which is how
+# mirzapanel's "additional bot" folders are found under whatever the operator
+# named them, and how a mirza_pro install is found next to them.
+php_bot_dirs() {
+    {
+        local d IFS=:
+        for d in ${MIGRATE_DIRS:-}; do
+            d=${d%/}
+            [ -f "$d/config.php" ] && readlink -f "$d"
+        done
+        for d in /var/www/html/*/; do
+            [ -f "$d/config.php" ] || continue
+            readlink -f "${d%/}"
+        done
+    } | awk '!seen[$0]++'
+}
+
+# next_free_N: the lowest bot number nothing here is using. A number counts as
+# taken when a config, an nginx backup, a running unit or a listening port
+# already answers for it, so a new source never lands on an existing bot.
+next_free_N() {
+    local n=1 taken
+    while [ "$n" -le 200 ]; do
+        taken=0
+        [ -f "$ETC/bot$n.env" ] && taken=1
+        [ -f "$ETC/bot$n.nginx.path" ] && taken=1
+        systemctl is-active --quiet "mitseller@$n" 2>/dev/null && taken=1
+        ss -ltn 2>/dev/null | grep -q ":$(port_for "$n") " && taken=1
+        [ "$taken" = 0 ] && { echo "$n"; return 0; }
+        n=$((n+1))
     done
+    return 1
+}
+
+# already_migrated php-dir — reports whether this directory was moved over by a
+# previous run (cmd_migrate records it in botN.phpdir).
+already_migrated() {
+    local f
+    for f in "$ETC"/bot*.phpdir; do
+        [ -f "$f" ] || continue
+        [ "$(readlink -f "$(cat "$f")" 2>/dev/null)" = "$(readlink -f "$1")" ] && return 0
+    done
+    return 1
 }
 
 # panel_link: the command that connects bots on ANOTHER server to the panel
@@ -345,8 +396,8 @@ cmd_panel_link() {
 
 cmd_all() {
     cmd_panel_update
-    if [ -z "$(php_bots)" ] && ! ls "$ETC"/bot*.env >/dev/null 2>&1; then
-        say "no MirzaBot on this server"
+    if [ -z "$(php_bot_dirs)" ] && ! ls "$ETC"/bot*.env >/dev/null 2>&1; then
+        say "no PHP bot on this server"
         find_panel && cmd_panel_link
         return 0
     fi
@@ -424,7 +475,7 @@ register_all() {
 }
 
 cmd_migrate_all() {
-    local self ok=() failed=() skipped=() dir n
+    local self ok=() failed=() skipped=() dir n f
     legacy_warn
     self=$(readlink -f "$0")
     [ -f "$self" ] || die "save this script to a file first (curl -sLo /root/mitseller-install.sh …) and run that file"
@@ -432,23 +483,43 @@ cmd_migrate_all() {
     install_unit
     panel_env
     export MITSELLER_BIN="$BIN" # every bot below uses the binary just installed
-    for dir in /var/www/html/botmirzapanel*/; do
-        n=${dir%/}; n=${n##*botmirzapanel}
-        case "$n" in ''|*[!0-9]*) continue ;; esac
-        [ -f "$dir/config.php" ] || continue
-        if systemctl is-active --quiet "mitseller@$n"; then
-            say "bot $n already runs on Go"
+    while read -r dir; do
+        [ -n "$dir" ] || continue
+        [ -f "$dir/config.php" ] || { warn "$dir has no config.php; skipped"; continue; }
+        # a bot already on Go is skipped — whether it was recorded here or was
+        # found by its old botmirzapanel<N> directory name
+        n=""
+        case "$dir" in
+            */botmirzapanel[0-9]*)
+                n=${dir##*botmirzapanel}
+                case "$n" in ''|*[!0-9]*) n="" ;; esac ;;
+        esac
+        if [ -n "$n" ] && systemctl is-active --quiet "mitseller@$n"; then
+            say "bot $n ($dir) already runs on Go"
             skipped+=("$n")
             continue
         fi
+        if already_migrated "$dir"; then
+            n=""
+            for f in "$ETC"/bot*.phpdir; do
+                [ -f "$f" ] || continue
+                if [ "$(readlink -f "$(cat "$f")" 2>/dev/null)" = "$(readlink -f "$dir")" ]; then
+                    n=${f##*/bot}; n=${n%.phpdir}; break
+                fi
+            done
+            say "bot ${n:-?} ($dir) already runs on Go"
+            [ -n "$n" ] && skipped+=("$n")
+            continue
+        fi
+        n=$(next_free_N) || { warn "$dir: no free bot number below 200; skipped"; skipped+=("?"); continue; }
         echo
-        say "======== bot $n ========"
+        say "======== bot $n ($dir) ========"
         set +e
-        MITSELLER_DEFER_REGISTER=1 N="$n" PHP_DIR="${dir%/}" bash "$self" migrate 2>&1 | tee "$BACKUPS/migrate-bot$n.log"
+        MITSELLER_DEFER_REGISTER=1 N="$n" PHP_DIR="$dir" bash "$self" migrate 2>&1 | tee "$BACKUPS/migrate-bot$n.log"
         local rc=${PIPESTATUS[0]}
         set -e
         if [ "$rc" = 0 ]; then ok+=("$n"); else failed+=("$n"); fi
-    done
+    done < <(php_bot_dirs)
     register_all "${ok[@]}" "${skipped[@]}"
     echo
     echo "=========================================="
@@ -551,6 +622,204 @@ EOF
     register_with_panel "$N" || true
 }
 
+# ------------------------------------------- move a bot from another server
+
+# bot-export: pack a bot up on the server it currently runs on. Read-only —
+# the bot keeps running, keeps its crontab, keeps its nginx site. PHP_DIR=
+# names a PHP bot, N= names a bot already on Go here.
+cmd_bot_export() {
+    local OUT="${OUT:?set OUT= (bundle file to write, e.g. /root/bot7-bundle.tar.gz)}"
+    case "$OUT" in /*) ;; *) OUT="$PWD/$OUT" ;; esac
+    [ -e "$OUT" ] && die "$OUT already exists; pick another name"
+
+    if [ -n "${PHP_DIR:-}" ] && [ -n "${N:-}" ]; then
+        die "give PHP_DIR= (a PHP bot) or N= (a bot already on Go), not both"
+    fi
+    if [ -z "${PHP_DIR:-}" ] && [ -z "${N:-}" ]; then
+        die "set PHP_DIR= (directory of the PHP bot) or N= (bot number on this server)"
+    fi
+
+    install_binary
+    if [ -n "${PHP_DIR:-}" ]; then
+        PHP_DIR="${PHP_DIR%/}"
+        [ -f "$PHP_DIR/config.php" ] || die "$PHP_DIR/config.php not found"
+        say "exporting the PHP bot in $PHP_DIR"
+        "$BIN" export-bundle --php-dir "$PHP_DIR" --out "$OUT"
+    else
+        local CFG="$ETC/bot${N}.env"
+        [ -f "$CFG" ] || die "$CFG not found"
+        say "exporting bot $N"
+        "$BIN" export-bundle -c "$CFG" --out "$OUT"
+    fi
+    say "bundle written: $OUT"
+    say "copy it to the other server and run: FILE=$OUT bash install.sh bot-import"
+}
+
+# bot-import: install a bundle as a new bot on this server. It is loaded and
+# answering locally, but held dark: no webhook, no crons, no panel. Nothing
+# here can disturb the bot that is still running on the other server.
+cmd_bot_import() {
+    local FILE="${FILE:?set FILE= (the bundle made by bot-export)}"
+    [ -f "$FILE" ] || die "$FILE not found"
+    if [ -n "${PHP_DIR:-}" ]; then die "bot-import does not take PHP_DIR; it reads the bundle"; fi
+
+    # read before the "local" below, which would shadow these with empties
+    local IN_DOMAIN="${DOMAIN:-}" IN_CERT_EMAIL="${CERT_EMAIL:-}"
+    local N="${N:-}" CFG PORT DBNAME DBUSER DBPASS TS
+    if [ -z "$N" ]; then
+        N=$(next_free_N) || die "no free bot number below 200"
+        say "N is not set: using bot number $N"
+    fi
+    CFG="$ETC/bot${N}.env"; PORT=$(port_for "$N")
+    DBNAME="mitseller${N}"; DBUSER="mitseller${N}user"; DBPASS=$(openssl rand -hex 12)
+    TS=$(date +%Y%m%d_%H%M%S)
+    local DOMAIN="$IN_DOMAIN" CERT_EMAIL="$IN_CERT_EMAIL"
+
+    [ -e "$CFG" ] && die "$CFG already exists; bot $N is installed"
+    if systemctl is-active --quiet "mitseller@$N"; then die "mitseller@$N is already running"; fi
+    if ss -ltn 2>/dev/null | grep -q ":$PORT "; then die "port $PORT is already in use"; fi
+    for t in nginx mysql; do command -v "$t" >/dev/null || die "$t is not installed"; done
+
+    install_binary
+    install_unit
+
+    say "creating database $DBNAME"
+    mysql <<EOF
+CREATE DATABASE IF NOT EXISTS \`$DBNAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+CREATE USER IF NOT EXISTS '$DBUSER'@'localhost' IDENTIFIED BY '$DBPASS';
+GRANT ALL PRIVILEGES ON \`$DBNAME\`.* TO '$DBUSER'@'localhost';
+FLUSH PRIVILEGES;
+EOF
+
+    say "reading the bundle"
+    if [ -n "$DOMAIN" ]; then
+        MITSELLER_INIT_DB_PASS="$DBPASS" "$BIN" import-bundle --file "$FILE" --out "$CFG" \
+            --listen "127.0.0.1:$PORT" --db-name "$DBNAME" --db-user "$DBUSER" \
+            --report "$BACKUPS/bot${N}-${TS}.import-report.txt" --domain "$DOMAIN"
+    else
+        MITSELLER_INIT_DB_PASS="$DBPASS" "$BIN" import-bundle --file "$FILE" --out "$CFG" \
+            --listen "127.0.0.1:$PORT" --db-name "$DBNAME" --db-user "$DBUSER" \
+            --report "$BACKUPS/bot${N}-${TS}.import-report.txt"
+    fi
+    secure_config "$CFG"
+    DOMAIN=$(grep '^DOMAIN=' "$CFG" | cut -d= -f2)
+
+    say "checking the database and the token"
+    "$BIN" check -c "$CFG"
+
+    say "nginx site for $DOMAIN"
+    proxy_snippet "$N"
+    cat > "/etc/nginx/sites-available/mitseller${N}" <<EOF
+server {
+    listen 80;
+    server_name $DOMAIN;
+    include /etc/nginx/snippets/mitseller${N}.conf;
+}
+EOF
+    ln -sf "/etc/nginx/sites-available/mitseller${N}" "/etc/nginx/sites-enabled/mitseller${N}"
+    nginx -t && systemctl reload nginx
+
+    if [ -n "$CERT_EMAIL" ]; then
+        say "SSL certificate"
+        certbot --nginx -d "$DOMAIN" --agree-tos --redirect --no-eff-email -m "$CERT_EMAIL" ||
+            warn "certbot failed; the bot still answers on http://$DOMAIN — rerun certbot before cutting over"
+    else
+        warn "no CERT_EMAIL given: $DOMAIN has no certificate yet. Set one before cutting over (Telegram needs https)"
+    fi
+
+    say "starting mitseller@$N (held dark: no webhook, no crons)"
+    systemctl enable --now "mitseller@$N"
+    wait_healthy "http://127.0.0.1:$PORT/healthz" 20 ||
+        die "the bot did not start; see: journalctl -u mitseller@$N"
+
+    echo
+    echo "=========================================="
+    echo "bot $N is loaded here but is NOT yet live."
+    echo "it is answering on http://$DOMAIN (and https, once it has a certificate)."
+    echo "the bot on the other server still answers Telegram; nothing has been disturbed."
+    echo
+    echo "when the domain points here and you are ready to move the bot across:"
+    echo "  N=$N bash install.sh bot-cutover"
+    echo "undo this import (the other server is untouched):"
+    echo "  N=$N bash install.sh bot-unimport"
+    echo "logs: journalctl -u mitseller@$N -f"
+    echo "=========================================="
+}
+
+# bot-cutover: the moment the bot moves. It takes the webhook from the other
+# server and starts its own cron jobs. Run it only once the domain resolves
+# here — until then Telegram would be told to send updates into a void.
+cmd_bot_cutover() {
+    N="${N:?set N= (bot number)}"
+    local CFG="$ETC/bot${N}.env" PORT DOMAIN
+    [ -f "$CFG" ] || die "$CFG not found"
+    PORT=$(port_for "$N"); DOMAIN=$(grep '^DOMAIN=' "$CFG" | cut -d= -f2)
+
+    install_binary
+    getent hosts "$DOMAIN" >/dev/null ||
+        die "DNS for $DOMAIN does not point here yet; cutting over now would stop the bot answering"
+    "$BIN" check -c "$CFG" || die "the bot is not healthy enough to cut over"
+    systemctl is-active --quiet "mitseller@$N" || { systemctl start "mitseller@$N"; wait_healthy "http://127.0.0.1:$PORT/healthz" 20; }
+
+    say "taking the webhook — from here this server answers Telegram for @$(grep '^BOT_USERNAME=' "$CFG" | cut -d= -f2)"
+    "$BIN" set-webhook -c "$CFG"
+
+    say "starting the cron jobs"
+    sed -i '/^DISABLE_CRONS=1$/d' "$CFG"
+    systemctl restart "mitseller@$N"
+    wait_healthy "http://127.0.0.1:$PORT/healthz" 20 || die "the bot did not restart; see: journalctl -u mitseller@$N"
+
+    register_with_panel "$N" || true
+
+    echo
+    echo "=========================================="
+    echo "bot $N is live on https://$DOMAIN"
+    echo "stop the old bot on the other server now: its PHP cron jobs would"
+    echo "otherwise keep messaging your users from a database that is no longer live."
+    echo "undo (put the webhook back on the other server):"
+    echo "  the other server still has its PHP bot; run there:"
+    echo "  bash install.sh bot-uncutover DOMAIN=<its domain>"
+    echo "logs: journalctl -u mitseller@$N -f"
+    echo "=========================================="
+}
+
+# bot-unimport: undo an import that was never cut over. The other server was
+# never touched, so this is safe at any time before bot-cutover.
+cmd_bot_unimport() {
+    N="${N:?set N= (bot number)}"
+    local CFG="$ETC/bot${N}.env" PORT DOMAIN SITE
+    [ -f "$CFG" ] || die "$CFG not found"
+    PORT=$(port_for "$N"); DOMAIN=$(grep '^DOMAIN=' "$CFG" | cut -d= -f2)
+
+    systemctl disable --now "mitseller@$N" 2>/dev/null || true
+    rm -f "$CFG" "$ETC/bot${N}.nginx.path" "$ETC/bot${N}.phpdir" "$ETC/bot${N}.crontab.bak"
+    SITE="/etc/nginx/sites-available/mitseller${N}"
+    rm -f "$SITE" "/etc/nginx/sites-enabled/mitseller${N}" "/etc/nginx/snippets/mitseller${N}.conf"
+    nginx -t && systemctl reload nginx
+
+    local DBNAME="mitseller${N}" DBUSER="mitseller${N}user"
+    if [ "${KEEP_DB:-0}" != 1 ]; then
+        say "dropping database $DBNAME (set KEEP_DB=1 to keep it)"
+        mysql -e "DROP DATABASE IF EXISTS \`$DBNAME\`; DROP USER IF EXISTS '$DBUSER'@'localhost'; FLUSH PRIVILEGES;" ||
+            warn "could not drop $DBNAME; remove it by hand"
+    else
+        say "keeping database $DBNAME"
+    fi
+    say "bot $N removed; the bot on the other server was never touched"
+}
+
+# bot-uncutover: put the webhook back on the other server. Run it THERE, after
+# its PHP bot is running again, to take the bot back from a Go server.
+cmd_bot_uncutover() {
+    DOMAIN="${DOMAIN:?set DOMAIN= (the domain the PHP bot is served on)}"
+    local TOKEN="${TOKEN:?set TOKEN= (the bot token, from config.php \$APIKEY)}"
+    command -v curl >/dev/null || die "curl is not installed"
+    say "moving the webhook back to https://$DOMAIN/index.php"
+    curl -fsS "https://api.telegram.org/bot$TOKEN/setWebhook?url=https%3A%2F%2F$DOMAIN%2Findex.php" >/dev/null ||
+        die "setWebhook failed; check the token and the domain"
+    say "the other server answers Telegram again; stop the Go bot there when you can"
+}
+
 # ----------------------------------------------------------------- migrate a PHP bot
 
 nginx_site_for() { # php dir -> site file that serves it with php-fpm
@@ -581,17 +850,56 @@ rewrite_nginx_site() { # file N
     mv -f "$out" "$1"
 }
 
+# The PHP cron scripts the Go bot reimplements itself. A crontab line calling
+# one of these is dropped at the cutover, because the Go bot runs that job
+# from its own scheduler. Anything else under /cron/ or /cronbot/ is left
+# alone: the Go bot has no equivalent for it, and silently stopping somebody's
+# backup, uptime or lottery job would be worse than leaving it running.
+GO_CRON_SCRIPTS='configtest.php cronvolume.php cronday.php removeexpire.php croncard.php sendmessage.php NoticationsService.php'
+
+# drop_cron_lines domain — reads a crontab on stdin and writes it back without
+# the lines this domain ran for jobs the Go bot now runs itself. The domain is
+# anchored behind "://" so that example.com never matches a line belonging to
+# evil-example.com.
+drop_cron_lines() {
+    local domain=$1 script s
+    awk -v d="$domain" -v keep="$GO_CRON_SCRIPTS" '
+    {
+        if (index($0, "://" d "/cron/") == 0 && index($0, "://" d "/cronbot/") == 0) { print; next }
+        script = ""
+        if (match($0, /[A-Za-z0-9_.-]+\.php/)) script = substr($0, RSTART, RLENGTH)
+        n = split(keep, list, " ")
+        for (i = 1; i <= n; i++) if (script == list[i]) next
+        print
+    }'
+}
+
+# drop_all_cron_lines domain — every cron line of this domain, whichever
+# script it calls. Only used on rollback: the lines the Go bot did not take
+# over were never removed, so restoring the backup on top of them would
+# install them twice. Wiping the domain's lines first and then putting the
+# whole backup back leaves the table exactly as it was.
+drop_all_cron_lines() {
+    grep -v -F -e "$1/cron/" -e "$1/cronbot/"
+}
+
 cmd_migrate() {
+    # N is optional when PHP_DIR names the bot: a free number is then taken.
+    if [ -n "${PHP_DIR:-}" ] && [ -z "${N:-}" ]; then
+        N=$(next_free_N) || die "no free bot number below 200"
+        say "PHP_DIR is set and N is not: using bot number $N"
+    fi
     N="${N:?set N= (bot number)}"
     local PHP_DIR="${PHP_DIR:-/var/www/html/botmirzapanel${N}}"
     PHP_DIR="${PHP_DIR%/}"
-    local CFG="$ETC/bot${N}.env" PORT TS SITE DOMAIN
+    local CFG="$ETC/bot${N}.env" PORT TS SITE DOMAIN REPORT
     PORT=$(port_for "$N")
     TS=$(date +%Y%m%d_%H%M%S)
+    REPORT="$BACKUPS/bot${N}-${TS}.migrate-report.txt"
 
     [ -f "$PHP_DIR/config.php" ] || die "$PHP_DIR/config.php not found (set PHP_DIR=)"
     command -v nginx >/dev/null || die "nginx is not installed"
-    SITE=$(nginx_site_for "$PHP_DIR") || die "no nginx site serves $PHP_DIR with php-fpm; migrate this one by hand (see docs/MIGRATION.md)"
+    SITE=$(nginx_site_for "$PHP_DIR") || die "no nginx site serves $PHP_DIR with php-fpm. The mirzapanel and mirza_pro installers put every bot behind one Apache site on a path, which mit-seller does not proxy; give this bot its own nginx site with \"root $PHP_DIR;\" and run this again (see docs/MIGRATION.md)"
     # dry-run the nginx rewrite on a copy, so an unusual layout stops us here
     cp "$SITE" "/tmp/mitseller-site-check.$$"
     rewrite_nginx_site "/tmp/mitseller-site-check.$$" "$N" || { rm -f "/tmp/mitseller-site-check.$$"; die "$SITE has a layout this script can't rewrite safely; migrate by hand (see docs/MIGRATION.md)"; }
@@ -607,7 +915,14 @@ cmd_migrate() {
     "$BIN" migrate-php --php-dir "$PHP_DIR" --out "$CFG" --listen "127.0.0.1:$PORT" --skip-db
     secure_config "$CFG"
     DOMAIN=$(grep '^DOMAIN=' "$CFG" | cut -d= -f2)
-    case "$DOMAIN" in */*) die "the PHP bot runs under a path ($DOMAIN); migrate it by hand (see docs/MIGRATION.md)";; esac
+    case "$DOMAIN" in
+    */*)
+        # the config is taken back out, so a bot number is not left claimed
+        # by a bot that was never migrated
+        rm -f "$CFG"
+        die "the PHP bot is served under a path ($PHP_DIR/config.php says \$domainhosts = \"$DOMAIN\"). mit-seller needs a site that serves this bot at its own domain root, so set up an nginx site for $PHP_DIR and run this again (see docs/MIGRATION.md)"
+        ;;
+    esac
 
     mkdir -p "$BACKUPS"
     say "backing up the database (before anything changes)"
@@ -616,8 +931,9 @@ cmd_migrate() {
     say "checking the database and the token"
     "$BIN" check -c "$CFG"
 
-    say "upgrading the schema (adds only what is missing; the PHP bot keeps working)"
-    "$BIN" migrate-php --php-dir "$PHP_DIR" --out "$CFG" --listen "127.0.0.1:$PORT" --clean-crontab=false
+    say "upgrading the schema and carrying over what the PHP bot named differently"
+    "$BIN" migrate-php --php-dir "$PHP_DIR" --out "$CFG" --listen "127.0.0.1:$PORT" \
+        --clean-crontab=false --report "$REPORT"
     secure_config "$CFG"
 
     say "trial run on 127.0.0.1:$PORT (crons off)"
@@ -633,11 +949,12 @@ cmd_migrate() {
     # ---- cut over: from here on, any failure puts PHP back
     cp -a "$SITE" "$ETC/bot${N}.nginx.bak"
     echo "$SITE" > "$ETC/bot${N}.nginx.path"
+    echo "$PHP_DIR" > "$ETC/bot${N}.phpdir"
     crontab -l > "$ETC/bot${N}.crontab.bak" 2>/dev/null || true
     trap 'warn "migration failed — restoring the PHP bot"; restore_php "$N"; exit 1' ERR
 
     say "stopping the PHP bot's cron jobs (the Go bot runs them itself)"
-    grep -v -F "$DOMAIN/cron/" "$ETC/bot${N}.crontab.bak" | crontab - || true
+    drop_cron_lines "$DOMAIN" < "$ETC/bot${N}.crontab.bak" | crontab - || true
 
     say "starting mitseller@$N"
     systemctl enable --now "mitseller@$N"
@@ -661,6 +978,7 @@ cmd_migrate() {
     echo "=========================================="
     echo "bot $N now runs on Go: https://$DOMAIN"
     echo "database backup: $BACKUPS/bot${N}-${TS}.sql.gz"
+    if [ -f "$REPORT" ]; then echo "what changed:   $REPORT"; fi
     echo "logs:            journalctl -u mitseller@$N -f"
     echo "undo:            N=$N bash install.sh rollback"
     print_keys "$N"
@@ -668,7 +986,7 @@ cmd_migrate() {
 }
 
 restore_php() { # N
-    local N="$1" SITE DOMAIN i
+    local N="$1" SITE DOMAIN i cur
     DOMAIN=$(grep '^DOMAIN=' "$ETC/bot${N}.env" | cut -d= -f2)
     # nginx first, so requests go straight from Go to PHP with no gap
     if [ -f "$ETC/bot${N}.nginx.bak" ] && [ -f "$ETC/bot${N}.nginx.path" ]; then
@@ -682,8 +1000,17 @@ restore_php() { # N
     fi
     systemctl disable --now "mitseller@$N" 2>/dev/null || true
     if [ -f "$ETC/bot${N}.crontab.bak" ]; then
-        # put back the PHP bot's cron lines, keep everything added since
-        { crontab -l 2>/dev/null | grep -v -F "$DOMAIN/cron/" || true; grep -F "$DOMAIN/cron/" "$ETC/bot${N}.crontab.bak" || true; } | crontab -
+        # wipe this domain's cron lines, then put back only this domain's
+        # lines from the backup. The jobs the Go bot did not take over were
+        # never removed, so appending the whole backup would install them —
+        # and every other bot's lines — a second time. Lines added since the
+        # migration, and other bots' lines, stay exactly where they are.
+        # the table is read into a variable first: crontab - truncates as soon
+        # as the pipeline starts, and a crontab -l inside the same pipeline
+        # would race it and see an empty table.
+        cur=$(crontab -l 2>/dev/null || true)
+        { [ -n "$cur" ] && printf '%s\n' "$cur" | drop_all_cron_lines "$DOMAIN" || true
+          grep -e "://$DOMAIN/cron/" -e "://$DOMAIN/cronbot/" "$ETC/bot${N}.crontab.bak" || true; } | crontab -
     fi
 }
 
@@ -870,6 +1197,11 @@ case "${1:-new}" in
     panel-update) cmd_panel_update ;;
     panel-link) cmd_panel_link ;;
     legacy-adopt) cmd_legacy_adopt ;;
+    bot-export) cmd_bot_export ;;
+    bot-import) cmd_bot_import ;;
+    bot-cutover) cmd_bot_cutover ;;
+    bot-unimport) cmd_bot_unimport ;;
+    bot-uncutover) cmd_bot_uncutover ;;
     all) cmd_all ;;
-    *) die "usage: install.sh [all|new|migrate|migrate-all|legacy-adopt|register|panel-update|panel-link|rollback|update|keys]" ;;
+    *) die "usage: install.sh [all|new|migrate|migrate-all|legacy-adopt|register|panel-update|panel-link|rollback|update|keys|bot-export|bot-import|bot-cutover|bot-unimport|bot-uncutover]" ;;
 esac

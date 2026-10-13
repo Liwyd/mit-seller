@@ -81,8 +81,24 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/payment/nowpayments/index.php", func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, "illegal access") })
 	mux.HandleFunc("/payment/aqayepardakht/aqayepardakht.php", s.aqayepardakhtStart)
 	mux.HandleFunc("/payment/aqayepardakht/back.php", s.aqayepardakhtBack)
+	// mirza_pro called the same two gateways by their flat paths, and
+	// registered the NOWPayments IPN at /payment/nowpayment.php with the
+	// provider. Serving the same handlers there keeps paid orders confirming
+	// after the cutover.
+	mux.HandleFunc("/payment/nowpayment.php", s.nowpaymentsBack)
+	mux.HandleFunc("/payment/aqayepardakht.php", s.aqayepardakhtStart)
+	// gateways mirza_pro had and this bot does not: answer with a clear 501
+	// rather than a silent 404, so an unpaid order is not mistaken for a
+	// broken site.
+	for _, p := range unsupportedPaymentPaths {
+		mux.HandleFunc(p, notImplemented(p))
+	}
 	mux.HandleFunc("/cron/", func(w http.ResponseWriter, r *http.Request) {
 		// the jobs run inside the bot now; old crontab lines are harmless
+		io.WriteString(w, "")
+	})
+	mux.HandleFunc("/cronbot/", func(w http.ResponseWriter, r *http.Request) {
+		// same for mirza_pro's /cronbot/ lines, which the migration removed
 		io.WriteString(w, "")
 	})
 	mux.HandleFunc("/table.php", func(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +127,24 @@ func (s *Server) Handler() http.Handler {
 		http.NotFound(w, r)
 	})
 	return mux
+}
+
+// unsupportedPaymentPaths are the endpoints mirza_pro's extra payment
+// gateways posted or redirected to. The Go bot implements none of them, so
+// they answer 501 with a name instead of 404.
+var unsupportedPaymentPaths = []string{
+	"/payment/zarinpal.php",
+	"/payment/tronado.php",
+	"/payment/iranpay1.php",
+	"/payment/paymentnv/back.php",
+	"/payment/card.php",
+	"/payment/ZarinPay/",
+}
+
+func notImplemented(path string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "payment gateway not supported by this bot ("+path+")", http.StatusNotImplemented)
+	}
 }
 
 func (s *Server) webhook(w http.ResponseWriter, r *http.Request) {

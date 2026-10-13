@@ -144,6 +144,13 @@ func (d *DB) EnsureSchema(adminID string, report func(string)) error {
 		d.addField("setting", "namecustome", "0", "VARCHAR(200)", report)
 		d.addField("setting", "removedayc", "1", "VARCHAR(100)", report)
 		d.addField("setting", "Extra_volume", "0", "VARCHAR(200)", report)
+		// mirza_pro never created these three (its trial settings live on
+		// marzban_panel instead), so its database needs them adding before
+		// the admin's status page can read them.
+		d.addField("setting", "help_Status", "0", "VARCHAR(200)", report)
+		d.addField("setting", "time_usertest", "1", "VARCHAR(600)", report)
+		d.addField("setting", "val_usertest", "100", "VARCHAR(600)", report)
+		d.addField("setting", "Channel_Report", "", "VARCHAR(600)", report)
 		s := d.Setting()
 		if s.IsNull("iran_number") {
 			d.Exec("UPDATE setting SET iran_number = ?", "0")
