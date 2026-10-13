@@ -222,6 +222,71 @@ print_keys() { # N
     echo "Mit Panel → Bot → افزودن ربات: address https://$(grep '^DOMAIN=' "$ETC/bot$1.env" | cut -d= -f2), and the two keys above."
 }
 
+# set-secret: change the code that unlocks panel management inside Telegram.
+#
+# Editing the config by hand is how a bot gets left unable to read its own
+# config: the file has to stay root:mitseller and mode 0640, or the service
+# (which runs as mitseller) cannot open it and restarts forever. This keeps
+# the ownership, backs the config up first, and only reports success once the
+# bot is answering again.
+#
+#   N=3 SECRET='new code' bash install.sh set-secret
+cmd_set_secret() {
+    local N="${N:?set N= (bot number)}"
+    local NEW="${SECRET:?set SECRET= (the new panel-management code)}"
+    local CFG="$ETC/bot${N}.env" BAK
+
+    [ -f "$CFG" ] || die "$CFG not found; bot $N is not installed"
+    # these are read as overrides of the file, so leaving one set would make
+    # "check" pass while the bot still starts on the old value
+    [ -n "${MITSELLER_MIT_SECRET:-}${NEXRABOT_NEXRA_SECRET:-}" ] &&
+        die "unset MITSELLER_MIT_SECRET/NEXRABOT_NEXRA_SECRET first; they override the config file"
+    [ -n "$NEW" ] || die "SECRET= is empty"
+
+    BAK="$BACKUPS/bot${N}-config-$(date +%Y%m%d_%H%M%S).env.bak"
+    cp -a "$CFG" "$BAK"
+    chmod 0640 "$BAK"
+    say "config backed up to $BAK"
+
+    python3 - "$CFG" "$NEW" <<'PY'
+import sys
+path, secret = sys.argv[1], sys.argv[2]
+lines = open(path).read().splitlines(True)
+out, seen = [], False
+for ln in lines:
+    if ln.startswith("MIT_SECRET="):
+        out.append("MIT_SECRET=%s\n" % secret)
+        seen = True
+    else:
+        out.append(ln)
+if not seen:
+    out.append("MIT_SECRET=%s\n" % secret)
+open(path, "w").writelines(out)
+PY
+    # back to the ownership and mode the service needs, whatever the rewrite did
+    secure_config "$CFG"
+
+    "$BIN" check -c "$CFG" >/dev/null || {
+        cp -a "$BAK" "$CFG"; secure_config "$CFG"
+        die "the new value does not parse; the old config has been restored from $BAK"
+    }
+
+    say "restarting mitseller@$N"
+    systemctl restart "mitseller@$N"
+    if ! wait_healthy "http://127.0.0.1:$(port_for "$N")/healthz" 30; then
+        cp -a "$BAK" "$CFG" && secure_config "$CFG"
+        systemctl restart "mitseller@$N" || true
+        die "the bot did not come back; the old config has been restored from $BAK"
+    fi
+    say "mitseller@$N is up again"
+    echo
+    echo "the code to type in Telegram is now:"
+    echo
+    echo "    $NEW"
+    echo
+    echo "(it gates panel management; customers are not affected by changing it)"
+}
+
 # ----------------------------------------------------------------- Mit Panel
 
 PANEL_REPO="${PANEL_REPO:-https://github.com/Liwyd/mit-panel}"
@@ -1277,6 +1342,7 @@ case "${1:-new}" in
     rollback) cmd_rollback ;;
     update) cmd_update ;;
     keys) N="${N:?set N=}"; print_keys "$N" ;;
+    set-secret) cmd_set_secret ;;
     register) cmd_register ;;
     migrate-all) cmd_migrate_all ;;
     panel-update) cmd_panel_update ;;
@@ -1290,5 +1356,5 @@ case "${1:-new}" in
     bot-unimport) cmd_bot_unimport ;;
     bot-uncutover) cmd_bot_uncutover ;;
     all) cmd_all ;;
-    *) die "usage: install.sh [all|new|migrate|migrate-all|legacy-adopt|register|panel-update|panel-link|backup-setup|backup-now|rollback|update|keys|bot-export|bot-import|bot-cutover|bot-unimport|bot-uncutover]" ;;
+    *) die "usage: install.sh [all|new|migrate|migrate-all|legacy-adopt|register|panel-update|panel-link|backup-setup|backup-now|set-secret|rollback|update|keys|bot-export|bot-import|bot-cutover|bot-unimport|bot-uncutover]" ;;
 esac

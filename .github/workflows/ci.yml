@@ -30,3 +30,6 @@ jobs:
 
       - name: Hourly backup job tests (backup-setup/backup-now)
         run: bash tests/install/backup_test.sh
+
+      - name: set-secret tests (keeps the config readable by the service)
+        run: bash tests/install/set_secret_test.sh
