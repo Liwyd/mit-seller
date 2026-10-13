@@ -38,10 +38,25 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./... && go test ./...
+      - name: Work out the version being built
+        id: ver
+        # the binary prints this on "mitseller version" and /healthz, so it has
+        # to be the tag being published and not a constant someone forgets
+        run: |
+          if [ "${{ github.ref_type }}" = tag ]; then
+            t="${{ github.ref_name }}"
+          else
+            t=$(tr -d ' \r\n' < .github/RELEASE_VERSION)
+          fi
+          case "$t" in v[0-9]*) ;; *) t="dev" ;; esac
+          echo "tag=$t" >> "$GITHUB_OUTPUT"
+          echo "building $t"
       - name: Build
         run: |
           for arch in amd64 arm64; do
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o dist/mitseller-linux-$arch ./cmd/mitseller
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X github.com/Liwyd/mit-seller/internal/bot.Version=${{ steps.ver.outputs.tag }}" \
+              -o dist/mitseller-linux-$arch ./cmd/mitseller
           done
       - uses: actions/upload-artifact@v4
         with:

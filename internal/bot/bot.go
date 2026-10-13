@@ -20,8 +20,12 @@ import (
 	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
-// Version is shown on the admin login message ($version in PHP).
-var Version = "7.0.0-go"
+// Version is shown on the admin login message ($version in PHP), on
+// "mitseller version" and in the /healthz line, so it is what tells you which
+// build is actually running on a server. The release workflow overwrites it
+// with the tag being built (-ldflags "-X .../internal/bot.Version=v7.1.0"),
+// which is why the default below is only a floor for a plain "go build".
+var Version = "7.1.0-go"
 
 type Bot struct {
 	Cfg *config.Config
