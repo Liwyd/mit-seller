@@ -27,3 +27,6 @@ jobs:
         run: bash tests/install/migrate_mirza_test.sh
       - name: Cross-server move tests (bot-export/import/cutover)
         run: bash tests/install/bot_move_test.sh
+
+      - name: Hourly backup job tests (backup-setup/backup-now)
+        run: bash tests/install/backup_test.sh

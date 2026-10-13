@@ -608,17 +608,8 @@ EOF
     say "webhook"
     "$BIN" set-webhook -c "$CFG"
 
-    say "hourly database backup to your Telegram"
-    cat > "/root/mitseller${N}_backup.sh" <<EOF
-#!/bin/bash
-FILE="/root/mitseller${N}_\$(date +%Y%m%d_%H%M%S).sql.gz"
-$BIN db-dump -c $CFG --out "\$FILE" >/dev/null
-curl -s -F chat_id="$ADMIN" -F document=@"\$FILE" -F caption="بکاپ خودکار $BOT_USER 🗄" \\
-  "${MITSELLER_TELEGRAM_API:-https://api.telegram.org}/bot$TOKEN/sendDocument" >/dev/null
-rm -f "\$FILE"
-EOF
-    chmod 700 "/root/mitseller${N}_backup.sh"
-    (crontab -l 2>/dev/null | grep -v "mitseller${N}_backup"; echo "$BACKUP_MINUTE * * * * bash /root/mitseller${N}_backup.sh") | crontab -
+    say "hourly backups (importable with: FILE=<bundle> bash install.sh bot-import)"
+    backup_setup
 
     echo
     echo "=========================================="
@@ -628,6 +619,92 @@ EOF
     echo "=========================================="
     # into Mit Panel too, when it runs here or MIT_PANEL_* are given
     register_with_panel "$N" || true
+}
+
+# --------------------------------------------- hourly, importable backups
+
+# backup_setup: one hourly job backing up every bot installed on this server.
+#
+# A backup is the same bundle bot-export writes, so it is not just a copy of
+# the database — "FILE=<bundle> bash install.sh bot-import" rebuilds the whole
+# bot from it on this server or any other. That is the difference between a
+# backup you can restore and one you can only hope about.
+#
+# KEEP_BACKUPS= keeps that many hourly bundles per bot (default 48 = 2 days).
+# It is safe to run at any time: export-bundle only reads a running bot.
+backup_setup() {
+    local SCRIPT=/usr/local/sbin/mitseller-backup
+    mkdir -p "$BACKUPS"
+    chmod 700 "$BACKUPS"
+
+    cat > "$SCRIPT" <<'EOF'
+#!/bin/bash
+# Back up every bot on this server, once an hour.
+#
+# Each backup is the bundle install.sh bot-export writes, so it can be
+# rebuilt on any server with:  FILE=<bundle> bash install.sh bot-import
+# A running bot is only read, never touched, so this is safe to run by hand.
+set -uo pipefail
+
+BACKUP_DIR=@@BACKUPS@@
+KEEP=${KEEP_BACKUPS:-48}                 # 48 hourly bundles = 2 days per bot
+BIN=${MITSELLER_BIN:-@@BIN@@}
+TG=${MITSELLER_TELEGRAM_API:-https://api.telegram.org}
+mkdir -p "$BACKUP_DIR" && chmod 700 "$BACKUP_DIR"
+ERR="$BACKUP_DIR/last-error.log"
+TS=$(date +%Y%m%d_%H%M%S)
+rc=0
+
+for cfg in @@ETC@@/bot*.env; do
+    [ -f "$cfg" ] || continue
+    name=$(basename "$cfg" .env)
+    out="$BACKUP_DIR/${name}-bundle-${TS}.tar.gz"
+    if "$BIN" export-bundle -c "$cfg" --out "$out" >/dev/null 2>>"$ERR"; then
+        printf '%s  %s  %s\n' "$name" "$(du -h "$out" | cut -f1)" "$(basename "$out")"
+    else
+        printf '%s  FAILED (see %s)\n' "$name" "$ERR" >&2
+        rm -f "$out"; rc=1; continue
+    fi
+    # off the server too, so a lost server does not take the backups with it
+    chat=$(sed -n 's/^ADMIN_ID=//p' "$cfg")
+    token=$(sed -n 's/^BOT_TOKEN=//p' "$cfg")
+    user=$(sed -n 's/^BOT_USERNAME=//p' "$cfg")
+    if [ -n "$chat" ] && [ -n "$token" ]; then
+        curl -s -m 60 -F chat_id="$chat" -F document=@"$out" \
+            -F caption="بکاپ خودکار $user 🗄" "$TG/bot$token/sendDocument" >/dev/null || true
+    fi
+done
+
+# drop the oldest bundles, keeping KEEP per bot
+for cfg in @@ETC@@/bot*.env; do
+    [ -f "$cfg" ] || continue
+    name=$(basename "$cfg" .env)
+    ls -1t "$BACKUP_DIR"/${name}-bundle-*.tar.gz 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -f
+done
+exit $rc
+EOF
+    # bake the paths in: cron has no idea what install.sh's variables were
+    sed -i -e "s|@@BACKUPS@@|$BACKUPS|g" -e "s|@@ETC@@|$ETC|g" -e "s|@@BIN@@|$BIN|g" "$SCRIPT"
+    chmod 700 "$SCRIPT"
+
+    # one line for every bot on the server, so a new bot is covered by the
+    # same job without anyone having to remember to add one. A server with no
+    # crontab yet is the normal case, so a failed "crontab -l" must not stop
+    # the line being installed.
+    { crontab -l 2>/dev/null | grep -v "$SCRIPT" || true
+      echo "$(date +%-M) * * * * $SCRIPT >/dev/null 2>&1"; } | crontab -
+    say "hourly backup job installed: $SCRIPT (keeping ${KEEP_BACKUPS:-48} bundles per bot)"
+}
+
+cmd_backup_setup() { backup_setup; }
+
+# backup-now: run the hourly job now, to see what it produces or to take an
+# extra backup before something you are about to change.
+cmd_backup_now() {
+    [ -x /usr/local/sbin/mitseller-backup ] ||
+        die "no backup job yet; run: bash install.sh backup-setup"
+    say "backing up every bot"
+    /usr/local/sbin/mitseller-backup
 }
 
 # ------------------------------------------- move a bot from another server
@@ -1205,11 +1282,13 @@ case "${1:-new}" in
     panel-update) cmd_panel_update ;;
     panel-link) cmd_panel_link ;;
     legacy-adopt) cmd_legacy_adopt ;;
+    backup-setup) cmd_backup_setup ;;
+    backup-now) cmd_backup_now ;;
     bot-export) cmd_bot_export ;;
     bot-import) cmd_bot_import ;;
     bot-cutover) cmd_bot_cutover ;;
     bot-unimport) cmd_bot_unimport ;;
     bot-uncutover) cmd_bot_uncutover ;;
     all) cmd_all ;;
-    *) die "usage: install.sh [all|new|migrate|migrate-all|legacy-adopt|register|panel-update|panel-link|rollback|update|keys|bot-export|bot-import|bot-cutover|bot-unimport|bot-uncutover]" ;;
+    *) die "usage: install.sh [all|new|migrate|migrate-all|legacy-adopt|register|panel-update|panel-link|backup-setup|backup-now|rollback|update|keys|bot-export|bot-import|bot-cutover|bot-unimport|bot-uncutover]" ;;
 esac
