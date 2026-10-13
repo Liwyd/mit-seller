@@ -552,6 +552,8 @@ cmd_new() {
     fi
     getent hosts "$DOMAIN" >/dev/null || die "DNS for $DOMAIN is not set yet; point the A record here first"
     for t in nginx certbot mysql; do command -v "$t" >/dev/null || die "$t is not installed"; done
+    python3 -c "import certbot_nginx" 2>/dev/null ||
+        die "certbot's nginx plugin is missing — install it first: apt install python3-certbot-nginx"
 
     install_binary
     install_unit
@@ -594,6 +596,12 @@ EOF
     nginx -t && systemctl reload nginx
 
     say "SSL certificate"
+    # certbot's own error for a missing plugin ("the requested nginx plugin
+    # does not appear to be installed") arrives only after the bot, the
+    # database and the site are already in place, which leaves a half-finished
+    # install to unwind. Check first, and say how to fix it.
+    python3 -c "import certbot_nginx" 2>/dev/null ||
+        die "certbot's nginx plugin is missing — install it and rerun: apt install python3-certbot-nginx"
     certbot --nginx -d "$DOMAIN" --agree-tos --redirect --no-eff-email -m "$CERT_EMAIL"
     wait_healthy "https://$DOMAIN/healthz" 20 || die "https://$DOMAIN/healthz does not answer"
 
