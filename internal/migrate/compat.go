@@ -347,8 +347,7 @@ func fixProductCategories(d *db.DB, r *Report) error {
           ON c.remark = p.category
         SET p.category = c.id
         WHERE p.category IS NOT NULL AND p.category <> ''
-          AND p.category NOT REGEXP '^[0-9]+$'
-          AND p.category <> c.id`)
+          AND p.category NOT REGEXP '^[0-9]+$'`)
 	if err != nil {
 		return fmt.Errorf("product: turning the category names into category ids: %w", err)
 	}
