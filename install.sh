@@ -573,9 +573,14 @@ cmd_provisioner_setup() {
         # The address goes in as a SAN so ordinary TLS clients accept it; the
         # panel trusts the certificate itself and does not care about the name,
         # which is what lets it address this server by IP or by hostname.
+        # basicConstraints CA:TRUE is what makes it usable as a trust anchor at
+        # all — a self-signed leaf is rejected by clients that follow RFC 5280,
+        # which is the whole of the point of it being self-signed here.
         openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
             -keyout "$PROVISIONER_KEY" -out "$PROVISIONER_CRT" \
             -subj "/CN=mit-seller-provisioner" \
+            -addext "basicConstraints=critical,CA:TRUE" \
+            -addext "keyUsage=critical,keyCertSign,cRLSign" \
             -addext "subjectAltName=DNS:mit-seller-provisioner${SERVER_ADDR:+,IP:$SERVER_ADDR}" >/dev/null 2>&1 ||
             die "openssl could not make a certificate"
         chown root:mitseller "$PROVISIONER_KEY" "$PROVISIONER_CRT"
@@ -632,6 +637,13 @@ UNIT
     sleep 1
     systemctl is-active --quiet mitseller-provisioner.service ||
         die "the provisioner did not start: journalctl -u mitseller-provisioner"
+    # A certificate clients will not accept as a trust anchor is worse than no
+    # certificate at all: the panel will quietly send nothing and the reason
+    # will be three servers away. Check it here, once, at setup.
+    if ! printf '' | openssl s_client -connect "127.0.0.1:$PORT" -CAfile "$PROVISIONER_CRT" \
+        -servername mit-seller-provisioner >/dev/null 2>&1; then
+        die "the certificate in $PROVISIONER_CRT is not accepted as a trust anchor; remove the .crt and .key and run provisioner-setup again"
+    fi
     cmd_provisioner_print
 }
 
