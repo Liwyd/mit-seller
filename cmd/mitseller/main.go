@@ -39,6 +39,7 @@ import (
 	"github.com/Liwyd/mit-seller/internal/db"
 	"github.com/Liwyd/mit-seller/internal/migrate"
 	"github.com/Liwyd/mit-seller/internal/php"
+	"github.com/Liwyd/mit-seller/internal/provisioner"
 	"github.com/Liwyd/mit-seller/internal/tg"
 	"github.com/Liwyd/mit-seller/internal/web"
 )
@@ -56,6 +57,7 @@ commands:
   check         test the database, the schema and the bot token
   init-config   write a config file for a new bot (used by install.sh)
   panel-register connect this bot to Mit Panel and give it to its owner
+  provisioner   serve the API Mit Panel uses to install a bot here
   db-dump       back up the bot's database (mysqldump, gzipped)
   export-bundle pack a bot (PHP or Go) up so another server can install it
   import-bundle unpack a bundle: write the config and load the database
@@ -89,6 +91,8 @@ func main() {
 		cmdInitConfig(args)
 	case "panel-register":
 		cmdPanelRegister(args)
+	case "provisioner":
+		cmdProvisioner(args)
 	case "db-dump":
 		cmdDump(args)
 	case "export-bundle":
@@ -658,4 +662,72 @@ func cmdPanelRegister(args []string) {
 			}
 		}
 	}
+}
+
+// cmdProvisioner serves the API Mit Panel uses to install a new bot on this
+// server. The token and the certificate paths live in /etc/mitseller/
+// provisioner.env, which install.sh provisioner-setup writes; the panel holds
+// the same token and trusts that certificate.
+func cmdProvisioner(args []string) {
+	fs := flag.NewFlagSet("provisioner", flag.ExitOnError)
+	listen := fs.String("listen", fmt.Sprintf(":%d", provisioner.DefaultPort), "address to listen on")
+	envFile := fs.String("env", envValue("MITSELLER_PROVISION_ENV", "/etc/mitseller/provisioner.env"), "file with MIT_PROVISION_TOKEN, MIT_PROVISION_CERT, MIT_PROVISION_KEY")
+	installer := fs.String("installer", envValue("MITSELLER_INSTALLER", provisioner.DefaultInstaller), "path to install.sh")
+	configDir := fs.String("config-dir", envValue("MITSELLER_CONFIG_DIR", provisioner.DefaultConfigDir), "where botN.env files live")
+	fs.Parse(args)
+
+	env, err := readKeyFile(*envFile)
+	if err != nil {
+		die("provisioner: %v", err)
+	}
+	token := strings.TrimSpace(env["MIT_PROVISION_TOKEN"])
+	cert, key := env["MIT_PROVISION_CERT"], env["MIT_PROVISION_KEY"]
+	if token == "" {
+		die("provisioner: MIT_PROVISION_TOKEN is missing from %s", *envFile)
+	}
+	if cert == "" || key == "" {
+		die("provisioner: MIT_PROVISION_CERT and MIT_PROVISION_KEY are required in %s", *envFile)
+	}
+
+	srv := &provisioner.Server{
+		Token:     token,
+		Installer: *installer,
+		ConfigDir: *configDir,
+		Logger:    log.New(os.Stderr, "provisioner ", log.LstdFlags),
+	}
+	srvHTTP := &http.Server{
+		Addr:              *listen,
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      15 * time.Minute, // install.sh new takes a while
+		IdleTimeout:       60 * time.Second,
+	}
+	log.Printf("provisioner listening on %s", *listen)
+	if err := srvHTTP.ListenAndServeTLS(cert, key); err != nil {
+		die("provisioner: %v", err)
+	}
+}
+
+// readKeyFile reads a KEY=value file the same shape as a bot config.
+func readKeyFile(path string) (map[string]string, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	out := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		v = strings.Trim(v, `"'`)
+		out[strings.TrimSpace(k)] = v
+	}
+	return out, nil
 }
