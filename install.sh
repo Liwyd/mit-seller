@@ -566,12 +566,17 @@ cmd_provisioner_setup() {
     install_binary
     install -d -m 0750 -o root -g mitseller "$ETC"
 
+    local SERVER_ADDR="${SERVER_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
     if [ ! -f "$PROVISIONER_CRT" ] || [ ! -f "$PROVISIONER_KEY" ]; then
         say "generating the provisioner certificate"
         umask 0077
+        # The address goes in as a SAN so ordinary TLS clients accept it; the
+        # panel trusts the certificate itself and does not care about the name,
+        # which is what lets it address this server by IP or by hostname.
         openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
             -keyout "$PROVISIONER_KEY" -out "$PROVISIONER_CRT" \
-            -subj "/CN=mit-seller-provisioner" -addext "subjectAltName=DNS:mit-seller-provisioner" >/dev/null 2>&1 ||
+            -subj "/CN=mit-seller-provisioner" \
+            -addext "subjectAltName=DNS:mit-seller-provisioner${SERVER_ADDR:+,IP:$SERVER_ADDR}" >/dev/null 2>&1 ||
             die "openssl could not make a certificate"
         chown root:mitseller "$PROVISIONER_KEY" "$PROVISIONER_CRT"
         chmod 0640 "$PROVISIONER_KEY" "$PROVISIONER_CRT"
