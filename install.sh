@@ -317,7 +317,32 @@ panel_var() { # NAME [default] — from the panel container's environment (its .
 }
 
 # panel_env: fill MIT_PANEL_* from the local panel unless they were given
+# panel.env holds the Mit Panel address and the superadmin's credentials on a
+# server that is not the panel's own, so `register` works there too. It is read
+# (never sourced: this file is root-owned and may hold a password, and nothing
+# here needs to execute it) before the local-panel autodiscovery below.
+PANEL_CREDS="$ETC/panel.env"
+
+panel_creds_load() {
+    [ -n "${MIT_PANEL_URL:-}" ] && return 0
+    [ -f "$PANEL_CREDS" ] || return 0
+    local line k v
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in ''|\#*) continue ;; esac
+        k=${line%%=*}; v=${line#*=}
+        v=${v%\"}; v=${v#\"}
+        case "$k" in
+            MIT_PANEL_URL) MIT_PANEL_URL=$v ;;
+            MIT_PANEL_USER) MIT_PANEL_USER=$v ;;
+            MIT_PANEL_PASS) MIT_PANEL_PASS=$v ;;
+            MIT_PANEL_INSECURE) MIT_PANEL_INSECURE=$v ;;
+        esac
+    done < "$PANEL_CREDS"
+    export MIT_PANEL_URL MIT_PANEL_USER MIT_PANEL_PASS MIT_PANEL_INSECURE
+}
+
 panel_env() {
+    panel_creds_load
     [ -n "${MIT_PANEL_URL:-}" ] && return 0
     find_panel || return 0
     local scheme=http
@@ -491,6 +516,144 @@ cmd_register() {
     [ -n "${MIT_PANEL_URL:-}" ] && [ -n "${MIT_PANEL_USER:-}" ] && [ -n "${MIT_PANEL_PASS:-}" ] ||
         die "set MIT_PANEL_URL, MIT_PANEL_USER and MIT_PANEL_PASS"
     register_with_panel "$N"
+}
+
+# panel-creds: remember the Mit Panel this server's bots belong to, so
+# `register` and the provisioner can connect them without the credentials being
+# typed again. Run it on the bot server, not on the panel's.
+#
+#   URL=https://panel.example.com USER=admin PASS=... bash install.sh panel-creds
+cmd_panel_creds() {
+    local URL="${URL:?set URL= (Mit Panel address, with its path)}"
+    local USER="${USER:?set USER= (Mit Panel superadmin username)}"
+    local PASS="${PASS:?set PASS= (Mit Panel superadmin password)}"
+    case "$URL" in http://*|https://*) ;; *) die "URL must start with http:// or https://" ;; esac
+    install -d -m 0750 -o root -g mitseller "$ETC"
+    umask 0077
+    {
+        printf 'MIT_PANEL_URL=%s\n' "$URL"
+        printf 'MIT_PANEL_USER=%s\n' "$USER"
+        printf 'MIT_PANEL_PASS=%s\n' "$PASS"
+    } > "$PANEL_CREDS.tmp"
+    chown root:mitseller "$PANEL_CREDS.tmp"
+    chmod 0640 "$PANEL_CREDS.tmp"
+    mv -f "$PANEL_CREDS.tmp" "$PANEL_CREDS"
+    say "saved to $PANEL_CREDS (root:mitseller 0640)"
+    say "register a bot with: N=<n> bash install.sh register"
+}
+
+# ------------------------------------------- the provisioner (what the panel calls)
+#
+# provisioner-setup starts a small TLS API that lets Mit Panel install a new bot
+# on this server. The panel runs in a container with no shell and no SSH, so
+# this is the only way it can ask. It is a privileged endpoint by design — it
+# runs install.sh new as root — so it is guarded three ways: a bearer token the
+# panel holds, its own self-signed certificate the panel pins, and a rate limit.
+#
+#   bash install.sh provisioner-setup
+#   SERVER_IP=176.124.199.78 bash install.sh provisioner-setup   # shown in the output
+PROVISIONER_ENV="$ETC/provisioner.env"
+PROVISIONER_CRT="$ETC/provisioner.crt"
+PROVISIONER_KEY="$ETC/provisioner.key"
+PROVISIONER_UNIT=/etc/systemd/system/mitseller-provisioner.service
+
+cmd_provisioner_setup() {
+    local PORT=18100 SELF
+    SELF=$(readlink -f "${BASH_SOURCE[0]}")
+    if ss -ltn 2>/dev/null | grep -q ":$PORT "; then
+        die "port $PORT is already in use"
+    fi
+    install_binary
+    install -d -m 0750 -o root -g mitseller "$ETC"
+
+    if [ ! -f "$PROVISIONER_CRT" ] || [ ! -f "$PROVISIONER_KEY" ]; then
+        say "generating the provisioner certificate"
+        umask 0077
+        openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+            -keyout "$PROVISIONER_KEY" -out "$PROVISIONER_CRT" \
+            -subj "/CN=mit-seller-provisioner" -addext "subjectAltName=DNS:mit-seller-provisioner" >/dev/null 2>&1 ||
+            die "openssl could not make a certificate"
+        chown root:mitseller "$PROVISIONER_KEY" "$PROVISIONER_CRT"
+        chmod 0640 "$PROVISIONER_KEY" "$PROVISIONER_CRT"
+    fi
+
+    local TOKEN=""
+    if [ -f "$PROVISIONER_ENV" ]; then
+        TOKEN=$(sed -n 's/^MIT_PROVISION_TOKEN=//p' "$PROVISIONER_ENV" | tr -d '"')
+    fi
+    if [ -z "$TOKEN" ]; then
+        TOKEN=$(openssl rand -hex 32)
+        umask 0077
+        {
+            printf 'MIT_PROVISION_TOKEN=%s\n' "$TOKEN"
+            printf 'MIT_PROVISION_CERT=%s\n' "$PROVISIONER_CRT"
+            printf 'MIT_PROVISION_KEY=%s\n' "$PROVISIONER_KEY"
+        } > "$PROVISIONER_ENV.tmp"
+        chown root:mitseller "$PROVISIONER_ENV.tmp"
+        chmod 0640 "$PROVISIONER_ENV.tmp"
+        mv -f "$PROVISIONER_ENV.tmp" "$PROVISIONER_ENV"
+        say "token generated in $PROVISIONER_ENV"
+    else
+        say "keeping the existing token in $PROVISIONER_ENV"
+    fi
+
+    umask 022
+    cat > "$PROVISIONER_UNIT" <<UNIT
+[Unit]
+Description=Mit Panel bot provisioner (lets the panel install a bot here)
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+ExecStart=$BIN provisioner -env $PROVISIONER_ENV -installer $SELF -config-dir $ETC
+Restart=always
+RestartSec=5
+User=root
+Group=mitseller
+UMask=0027
+# install.sh new needs to write nginx, certificates and mysql, so this service
+# is root by design. The bearer token in $PROVISIONER_ENV is the only way in.
+NoNewPrivileges=false
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    systemctl daemon-reload
+    systemctl enable --now mitseller-provisioner.service >/dev/null 2>&1
+    sleep 1
+    systemctl is-active --quiet mitseller-provisioner.service ||
+        die "the provisioner did not start: journalctl -u mitseller-provisioner"
+    cmd_provisioner_print
+}
+
+cmd_provisioner_print() {
+    [ -f "$PROVISIONER_ENV" ] || die "no provisioner yet; run: bash install.sh provisioner-setup"
+    local TOKEN="" CRT="" IP=""
+    TOKEN=$(sed -n 's/^MIT_PROVISION_TOKEN=//p' "$PROVISIONER_ENV" | tr -d '"')
+    CRT=$(sed -n 's/^MIT_PROVISION_CERT=//p' "$PROVISIONER_ENV" | tr -d '"')
+    IP="${SERVER_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+    echo
+    echo "Mit Panel → تنظیمات → سرور mit-seller — paste these three:"
+    echo
+    printf '  mitseller_server          = %s\n' "$IP"
+    printf '  mitseller_provision_token = %s\n' "$TOKEN"
+    echo
+    echo "  mitseller_server_cert ="
+    sed 's/^/  /' "$CRT"
+    echo
+    echo "  The panel reaches this server at https://$IP:18100/provision"
+}
+
+cmd_provisioner_teardown() {
+    systemctl disable --now mitseller-provisioner.service >/dev/null 2>&1 || true
+    rm -f "$PROVISIONER_UNIT"
+    systemctl daemon-reload
+    rm -f "$PROVISIONER_ENV"
+    warn "removed the unit and $PROVISIONER_ENV; the certificate and key are left in $ETC"
 }
 
 # shared_admin_ids N... — the Telegram ids that are admin on every one of these
@@ -1344,6 +1507,10 @@ case "${1:-new}" in
     keys) N="${N:?set N=}"; print_keys "$N" ;;
     set-secret) cmd_set_secret ;;
     register) cmd_register ;;
+    panel-creds) cmd_panel_creds ;;
+    provisioner-setup) cmd_provisioner_setup ;;
+    provisioner-print) cmd_provisioner_print ;;
+    provisioner-teardown) cmd_provisioner_teardown ;;
     migrate-all) cmd_migrate_all ;;
     panel-update) cmd_panel_update ;;
     panel-link) cmd_panel_link ;;
@@ -1356,5 +1523,5 @@ case "${1:-new}" in
     bot-unimport) cmd_bot_unimport ;;
     bot-uncutover) cmd_bot_uncutover ;;
     all) cmd_all ;;
-    *) die "usage: install.sh [all|new|migrate|migrate-all|legacy-adopt|register|panel-update|panel-link|backup-setup|backup-now|set-secret|rollback|update|keys|bot-export|bot-import|bot-cutover|bot-unimport|bot-uncutover]" ;;
+    *) die "usage: install.sh [all|new|migrate|migrate-all|legacy-adopt|register|panel-creds|provisioner-setup|provisioner-print|provisioner-teardown|panel-update|panel-link|backup-setup|backup-now|set-secret|rollback|update|keys|bot-export|bot-import|bot-cutover|bot-unimport|bot-uncutover]" ;;
 esac

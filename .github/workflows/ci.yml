@@ -33,3 +33,6 @@ jobs:
 
       - name: set-secret tests (keeps the config readable by the service)
         run: bash tests/install/set_secret_test.sh
+
+      - name: Provisioner tests (the API Mit Panel installs bots over)
+        run: bash tests/install/provisioner_test.sh
