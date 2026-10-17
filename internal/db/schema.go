@@ -261,7 +261,29 @@ func (d *DB) EnsureSchema(adminID string, report func(string)) error {
 		d.addField("invoice", "time_sell", "", "VARCHAR(2000)", report)
 		d.addField("invoice", "user_info", "", "TEXT", report)
 		d.addField("invoice", "Status", "", "VARCHAR(2000)", report)
+		// How the row got here: empty for a bot sale, "claimed" when a user
+		// attached a config they bought outside the bot, "claimed_admin" when
+		// an admin approved that by hand. Reports and refunds need to tell
+		// the three apart; nothing that lists services reads it.
+		d.addField("invoice", "source", "", "VARCHAR(20)", report)
 	}
+
+	// ---- claim_request: a user asking to take a config they already have in
+	// the panel into their own list in the bot. Tier one (the panel username
+	// starts with the claimant's own Telegram id, which is how the default
+	// username method writes them) is applied without asking; anything else
+	// waits here for an admin.
+	d.Exec(`CREATE TABLE IF NOT EXISTS claim_request (
+        id_claim varchar(64) PRIMARY KEY,
+        id_user varchar(200) NOT NULL,
+        username varchar(200) NOT NULL,
+        name_panel varchar(200) NOT NULL,
+        status varchar(32) NOT NULL,
+        method varchar(32) NOT NULL,
+        reason varchar(500) NULL,
+        created_at varchar(40) NOT NULL,
+        reviewed_at varchar(40) NULL,
+        reviewed_by varchar(64) NULL)` + engine)
 
 	// ---- Payment_report
 	if !d.tableExists("Payment_report") {

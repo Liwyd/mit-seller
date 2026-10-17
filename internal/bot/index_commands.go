@@ -65,7 +65,7 @@ func (c *Ctx) secCommands() bool {
 	}
 	if c.text == "/status" {
 		n := d.Count("SELECT COUNT(*) FROM invoice WHERE id_user = ? AND "+activeInvoiceWhere, c.fromID)
-		if n == 0 && c.setting.S("NotUser") == "offnotuser" {
+		if n == 0 && c.setting.S("NotUser") == "0" {
 			c.send(c.fromID, T("users.sell.service_not_available"), nil, "html")
 			return true
 		}
@@ -75,8 +75,11 @@ func (c *Ctx) secCommands() bool {
 		for _, r := range d.MustQuery("SELECT username FROM invoice WHERE id_user = ? AND "+activeInvoiceWhere+" ORDER BY time_sell DESC LIMIT 0, 10", c.fromID) {
 			rows = append(rows, row(cb("🌟"+r.S("username")+"🌟", "product_"+r.S("username"))))
 		}
-		if c.setting.S("NotUser") == "onnotuser" {
-			rows = append(rows, row(cb(T("Admin.Status.notusenameinbot"), "notusernameget")))
+		// NotUser is the "نام کاربری من در لیست نیست" switch in Mit Panel, which
+		// writes it as "1"/"0" (see ToggleSetting). With nothing of their own
+		// this is the only row on the list, which is exactly when it is wanted.
+		if c.setting.S("NotUser") == "1" {
+			rows = append(rows, row(cb(T("Admin.Status.notusenameinbot"), "usernotlist")))
 		}
 		total := d.SelectCount("invoice", "id_user", c.fromID)
 		pages := (total + per - 1) / per

@@ -17,7 +17,7 @@ func (c *Ctx) adminFlow() {
 		c.admEntry, c.admAdmins, c.admStats, c.admPanelAdd, c.admBroadcast, c.admTexts,
 		c.admMessages, c.admPanelStatus, c.admShop, c.admAutopay, c.admPayments, c.admProducts,
 		c.admUserBalance, c.admDiscountsAndPanelFlags, c.admPaySettings, c.admManagePanel,
-		c.admExtraBalance, c.admAffiliates, c.admCancelRequests, c.admCron, c.admUserSearch, c.admTail,
+		c.admExtraBalance, c.admAffiliates, c.admCancelRequests, c.admCron, c.admUserSearch, c.admClaims, c.admTail,
 	} {
 		if s() {
 			return

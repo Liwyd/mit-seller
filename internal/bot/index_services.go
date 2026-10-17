@@ -15,7 +15,7 @@ func (c *Ctx) secServices() bool {
 	d := c.db()
 	if c.text == c.texts["text_Purchased_services"] || c.datain == "backorder" || c.text == "/services" {
 		n := d.Count("SELECT COUNT(*) FROM invoice WHERE id_user = ? AND "+activeInvoiceWhere, c.fromID)
-		if n == 0 && c.setting.S("NotUser") == "offnotuser" {
+		if n == 0 && c.setting.S("NotUser") == "0" {
 			c.send(c.fromID, T("users.sell.service_not_available"), nil, "html")
 			return true
 		}
@@ -61,26 +61,8 @@ func (c *Ctx) secServices() bool {
 		c.step("getdata")
 	} else if c.m(`locationnotuser_(.*)`) {
 		panel := d.Select("marzban_panel", "name_panel", "id", c.g(1))
-		out := c.b.PM.DataUser(panel.S("name_panel"), c.user.S("Processing_value"))
-		if out.S("status") == "Unsuccessful" && out.S("msg") == "User not found" {
-			c.send(c.fromID, T("users.status.notUsernameget"), c.kbMain(), "html")
-			c.step("home")
-			return true
-		}
-		s := describe(out, true)
-		info := ik(
-			row(cb(out.S("username"), "username"), cb(T("users.status.username"), "username")),
-			row(cb(s.statusVar, "status_var"), cb(T("users.status.status"), "status_var")),
-			row(cb(s.expiration, "expirationDate"), cb(T("users.status.expirationDate"), "expirationDate")),
-			[]B{},
-			row(cb(s.day, "day"), cb(T("users.status.daysleft"), "day")),
-			row(cb(s.lastTraffic, "LastTraffic"), cb(T("users.status.LastTraffic"), "LastTraffic")),
-			row(cb(s.used, "expirationDate"), cb(T("users.status.usedTrafficGb"), "expirationDate")),
-			row(cb(s.remaining, "RemainingVolume"), cb(T("users.status.RemainingVolume"), "RemainingVolume")),
-		)
-		c.send(c.fromID, T("users.status.info"), info, "html")
-		c.send(c.fromID, T("users.selectoption"), c.kbMain(), "html")
-		c.step("home")
+		typed := c.user.S("Processing_value")
+		return c.secClaim(panel.S("name_panel"), typed, c.b.PM.DataUser(panel.S("name_panel"), typed))
 	}
 	if c.m(`product_(\w+)`) {
 		if c.serviceCard(c.g(1)) {
