@@ -28,7 +28,7 @@ func (m *Manager) MitLogin(panel db.Row) map[string]any {
 		}
 	}
 	r := req{method: "POST", url: mitBase(panel) + "/login", timeout: 8 * time.Second,
-		body:        formBody("username", panel.S("username_panel"), "password", panel.S("password_panel")),
+		insecure: true, body: formBody("username", panel.S("username_panel"), "password", panel.S("password_panel")),
 		contentType: "application/x-www-form-urlencoded", headers: map[string]string{"accept": "application/json"}}.do()
 	if r.err != nil {
 		return map[string]any{"error": r.err.Error()}
@@ -89,7 +89,7 @@ func (m *Manager) mitRequest(panel db.Row, method, path string, payload any) map
 		body = marshal(payload)
 		ct = "application/json"
 	}
-	r := req{method: method, url: mitBase(panel) + path, body: body, contentType: ct, headers: h, timeout: 10 * time.Second}.do()
+	r := req{method: method, url: mitBase(panel) + path, insecure: true, body: body, contentType: ct, headers: h, timeout: 10 * time.Second}.do()
 	if r.err != nil {
 		return map[string]any{"detail": r.err.Error()}
 	}
@@ -107,7 +107,7 @@ func (m *Manager) MitDashboard(panel db.Row) map[string]any {
 		}
 		return map[string]any{"detail": e}
 	}
-	r := req{url: mitBase(panel) + "/dashboard", timeout: 10 * time.Second,
+	r := req{url: mitBase(panel) + "/dashboard", insecure: true, timeout: 10 * time.Second,
 		headers: map[string]string{"Accept": "application/json", "Authorization": "Bearer " + tok}}.do()
 	if r.err != nil {
 		return map[string]any{"detail": r.err.Error()}
