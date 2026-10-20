@@ -1523,19 +1523,63 @@ cmd_legacy_adopt() {
 
 # ----------------------------------------------------------------- update
 
+# update: the newest release, and every bot moved onto it one at a time.
+#
+# The binary that is replaced is kept as $BIN.previous first. It is one file
+# shared by every bot on this server, so if a bot does not answer after its
+# restart the copy goes back and every bot is restarted on it: a release that
+# misbehaves costs a few seconds instead of a bot, and no server is left with
+# bots running two different versions.
+#
+#   bash install.sh update                 # latest release
+#   RELEASE=v7.0.0 bash install.sh update  # one version
 cmd_update() {
-    local units
+    local units u n old="" new previous="$BIN.previous"
+    local active=() resting=() bad=()
     legacy_warn
     units=$(systemctl list-units --type=service --all --plain --no-legend 'mitseller@*' | awk '{print $1}')
+    if [ -x "$BIN" ]; then
+        old=$("$BIN" version 2>/dev/null || true)
+        cp -p "$BIN" "$previous" ||
+            warn "could not keep a copy at $previous: this update cannot roll itself back"
+    fi
     install_binary
+    new=$("$BIN" version)
     install_unit
     for u in $units; do
-        local n=${u#mitseller@}; n=${n%.service}
+        if systemctl is-active --quiet "$u"; then active+=("$u"); else resting+=("$u"); fi
+    done
+    if [ ${#resting[@]} -gt 0 ]; then
+        local names=""
+        for u in "${resting[@]}"; do
+            n=${u#mitseller@}; n=${n%.service}
+            names="$names $n"
+        done
+        say "not running, so not restarted (they start on $new next time):${names}"
+    fi
+    for u in "${active[@]}"; do
+        n=${u#mitseller@}; n=${n%.service}
         say "restarting $u"
         systemctl restart "$u"
-        wait_healthy "http://127.0.0.1:$(port_for "$n")/healthz" 30 || warn "$u is not healthy; see: journalctl -u $u"
+        wait_healthy "http://127.0.0.1:$(port_for "$n")/healthz" 30 && continue
+        bad+=("$n")
+        warn "$u did not answer on $new; see: journalctl -u $u"
     done
-    say "all bots run $("$BIN" version)"
+    if [ ${#bad[@]} -gt 0 ] && [ -x "$previous" ]; then
+        warn "rolling back to $old: bots ${bad[*]} did not answer on $new"
+        install -m 0755 "$previous" "$BIN"
+        for u in "${active[@]}"; do
+            n=${u#mitseller@}; n=${n%.service}
+            say "restarting $u on $old"
+            systemctl restart "$u"
+            wait_healthy "http://127.0.0.1:$(port_for "$n")/healthz" 30 ||
+                warn "$u is still not answering; see: journalctl -u $u"
+        done
+        die "the update to $new was rolled back to $old: bots ${bad[*]} did not answer on it"
+    fi
+    [ ${#bad[@]} -eq 0 ] ||
+        die "bots ${bad[*]} are not answering and there is no previous binary to go back to; see: journalctl -u mitseller@<n>"
+    say "all bots run $new${old:+ (was $old)}"
 }
 
 case "${1:-new}" in
