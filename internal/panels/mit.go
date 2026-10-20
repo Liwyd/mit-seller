@@ -96,6 +96,15 @@ func (m *Manager) mitRequest(panel db.Row, method, path string, payload any) map
 	return jsonObj(r.body)
 }
 
+// mitDashboardPath is the reseller's dashboard in Mit Panel.
+//
+// The trailing slash is part of the address, not a detail: Mit Panel serves
+// its web page at "/dashboard" and its JSON at "/dashboard/", so asking for
+// the one without the slash answered with a page of HTML and every "mit"
+// panel looked broken — the traffic figure never arrived and the panel's
+// own connection test failed.
+const mitDashboardPath = "/dashboard/"
+
 // MitDashboard is mit_dashboard().
 func (m *Manager) MitDashboard(panel db.Row) map[string]any {
 	auth := m.MitLogin(panel)
@@ -107,7 +116,7 @@ func (m *Manager) MitDashboard(panel db.Row) map[string]any {
 		}
 		return map[string]any{"detail": e}
 	}
-	r := req{url: mitBase(panel) + "/dashboard", insecure: true, timeout: 10 * time.Second,
+	r := req{url: mitBase(panel) + mitDashboardPath, insecure: true, timeout: 10 * time.Second,
 		headers: map[string]string{"Accept": "application/json", "Authorization": "Bearer " + tok}}.do()
 	if r.err != nil {
 		return map[string]any{"detail": r.err.Error()}
