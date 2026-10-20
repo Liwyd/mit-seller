@@ -558,10 +558,20 @@ PROVISIONER_KEY="$ETC/provisioner.key"
 PROVISIONER_UNIT=/etc/systemd/system/mitseller-provisioner.service
 
 cmd_provisioner_setup() {
-    local PORT=18100 SELF
-    SELF=$(readlink -f "${BASH_SOURCE[0]}")
+    local PORT=18100 SELF i
+    SELF=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)
+    [ -n "$SELF" ] && [ -f "$SELF" ] ||
+        die "this script is not in a file (it was piped into bash); save it first: curl -sLo /root/install.sh $RAW_URL && bash /root/install.sh provisioner-setup"
+    # Re-running this is how a server that already has a provisioner picks up a
+    # unit file that has been fixed, so stop the service we own before judging
+    # the port: the check below only means to refuse something else on $PORT.
+    systemctl disable --now mitseller-provisioner.service >/dev/null 2>&1 || true
+    for i in 1 2 3 4 5; do
+        ss -ltn 2>/dev/null | grep -q ":$PORT " || break
+        sleep 1
+    done
     if ss -ltn 2>/dev/null | grep -q ":$PORT "; then
-        die "port $PORT is already in use"
+        die "port $PORT is already in use (the provisioner we own was stopped; if it was not this service holding the port, stop whatever is)"
     fi
     install_binary
     install -d -m 0750 -o root -g mitseller "$ETC"
@@ -631,8 +641,15 @@ UMask=0027
 # is root by design. The bearer token in $PROVISIONER_ENV is the only way in.
 NoNewPrivileges=false
 PrivateTmp=true
-ProtectHome=true
-ProtectSystem=full
+# Nothing else: neither of the usual hardening options can be on here.
+#   ProtectHome=true mounts an empty tmpfs over /root, where install.sh lives,
+#   so ExecStart cannot be executed at all and every install comes back as
+#   "fork/exec /root/install.sh: no such file or directory".
+#   ProtectSystem=full makes /etc read-only, which is where install.sh new
+#   writes the bot's config and nginx site, where certbot keeps its
+#   certificates, and where this unit file itself lives.
+# provisioner-setup is what writes this unit, so re-run it to apply a change
+# to it; the service keeps running the old one until then.
 
 [Install]
 WantedBy=multi-user.target
