@@ -58,6 +58,8 @@ commands:
   init-config   write a config file for a new bot (used by install.sh)
   panel-register connect this bot to Mit Panel and give it to its owner
   provisioner   serve the API Mit Panel uses to install a bot here
+  update        install the newest release here and restart every bot
+                (RELEASE=<tag> pins one version; needs root, like install.sh)
   db-dump       back up the bot's database (mysqldump, gzipped)
   export-bundle pack a bot (PHP or Go) up so another server can install it
   import-bundle unpack a bundle: write the config and load the database
@@ -93,6 +95,8 @@ func main() {
 		cmdPanelRegister(args)
 	case "provisioner":
 		cmdProvisioner(args)
+	case "update":
+		cmdUpdate(args)
 	case "db-dump":
 		cmdDump(args)
 	case "export-bundle":
@@ -661,6 +665,28 @@ func cmdPanelRegister(args []string) {
 				}
 			}
 		}
+	}
+}
+
+// cmdUpdate hands the update to install.sh, which owns the release download
+// and the one-at-a-time restart of every bot on this server. The binary
+// cannot do it itself: it is a single file shared by every bot here, and it
+// is running while this command runs.
+func cmdUpdate(_ []string) {
+	installer := os.Getenv("MITSELLER_INSTALLER")
+	if installer == "" {
+		installer = provisioner.DefaultInstaller
+	}
+	if _, err := os.Stat(installer); err != nil {
+		die("install.sh is not at %s; run it from wherever it is saved (bash <that file> update), or set MITSELLER_INSTALLER=<path>", installer)
+	}
+	if os.Geteuid() != 0 {
+		die("update has to run as root: it replaces the bot binary every bot on this server runs")
+	}
+	cmd := exec.Command("bash", installer, "update")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		die("update failed: %v", err)
 	}
 }
 
