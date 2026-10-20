@@ -4,7 +4,8 @@
 #
 #   New bot (same variables as the old PHP installer):
 #     N=7 TOKEN='123:abc' DOMAIN='bot7.example.com' ADMIN='123456789' \
-#     MIT_SECRET='secret' CERT_EMAIL='you@example.com' bash install.sh
+#     MIT_SECRET='secret' bash install.sh        # CERT_EMAIL defaults to
+#                                                 # mitgetcert@gmail.com
 #
 #   Move a running PHP bot to Go (same database, same webhook, no downtime):
 #     N=7 bash install.sh migrate          # PHP_DIR=/var/www/html/botmirzapanel7 by default
@@ -806,7 +807,10 @@ cmd_new() {
     DOMAIN="${DOMAIN:?set DOMAIN= (domain of this bot, A record must already point here)}"
     ADMIN="${ADMIN:?set ADMIN= (your numeric Telegram id)}"
     MIT_SECRET="${MIT_SECRET:?set MIT_SECRET= (secret code that gates panel management)}"
-    CERT_EMAIL="${CERT_EMAIL:?set CERT_EMAIL= (email for the SSL certificate)}"
+    # Every certificate this server asks for is issued to one address, so
+    # expiry notices land in one inbox. Set CERT_EMAIL= to send them
+    # somewhere else.
+    CERT_EMAIL="${CERT_EMAIL:-mitgetcert@gmail.com}"
     DBPASS="${DBPASS:-$(openssl rand -hex 12)}"
     BACKUP_MINUTE="${BACKUP_MINUTE:-$((RANDOM % 60))}"
     local DBNAME="mitseller${N}" DBUSER="mitseller${N}user" CFG="$ETC/bot${N}.env" PORT
