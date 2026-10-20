@@ -151,6 +151,20 @@ grep -q 'chown root:mitseller' "$SB/state/chown" && ok "files are chown'd to roo
 grep -q 'provisioner -env' "$UNIT" && ok "the unit runs the provisioner" || fail "unit: $(cat "$UNIT" 2>/dev/null)"
 grep -q -- "-installer $SB/install.sh" "$UNIT" &&
     ok "the unit points at this installer, not a hard-coded /root path" || fail "installer line: $(grep installer "$UNIT")"
+# ProtectHome mounts an empty tmpfs over /root, so the service cannot even
+# exec the installer it just named; ProtectSystem=full makes /etc read-only,
+# which is where install.sh new writes every config. Both of them take every
+# install down, so neither may come back.
+if grep -q '^ProtectHome=' "$UNIT"; then
+    fail "the unit hides /root, so exec of the installer fails: $(grep '^ProtectHome=' "$UNIT")"
+else
+    ok "the unit can see the installer (no ProtectHome)"
+fi
+if grep -q '^ProtectSystem=' "$UNIT"; then
+    fail "the unit makes /etc read-only, where install.sh new writes: $(grep '^ProtectSystem=' "$UNIT")"
+else
+    ok "the unit can write /etc (no ProtectSystem)"
+fi
 grep -q 'enable --now mitseller-provisioner' "$SB/state/systemctl" &&
     ok "the service is enabled and started" || fail "systemctl: $(cat "$SB/state/systemctl")"
 
@@ -177,6 +191,11 @@ echo "LISTEN 0 512 0.0.0.0:18100 0.0.0.0:*"
 EOF
 out=$(run provisioner-setup 2>&1) && fail "it ran with port 18100 taken" || true
 echo "$out" | grep -q 'already in use' && ok "it refuses when the port is taken" || fail "message: $out"
+# Re-running setup is how a fixed unit file gets installed, so the service we
+# own has to be stopped first — otherwise its own listener is the port that is
+# "already in use" and the fix can never be applied.
+grep -q 'disable --now mitseller-provisioner' "$SB/state/systemctl" &&
+    ok "it stops its own service before judging the port" || fail "systemctl: $(cat "$SB/state/systemctl")"
 
 # ---- teardown removes the token and the unit, and leaves the key behind
 fresh
