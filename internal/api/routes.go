@@ -65,6 +65,7 @@ func (a *API) routes() {
 
 	// money
 	a.handle("GET /api/v1/payments", roleManager, a.listPayments)
+	a.handle("GET /api/v1/payments/pending", roleManager, a.listPending)
 	a.handle("POST /api/v1/payments/{order}/approve", roleManager, a.approvePayment)
 	a.handle("POST /api/v1/payments/{order}/reject", roleManager, a.rejectPayment)
 	a.handle("GET /api/v1/payments/{order}/receipt", roleManager, a.receipt)
@@ -74,6 +75,9 @@ func (a *API) routes() {
 	a.handle("GET /api/v1/autopay", roleManager, a.getAutopay)
 	a.handle("PUT /api/v1/autopay", roleManager, a.putAutopay)
 	a.handle("POST /api/v1/autopay/new-key", roleManager, a.autopayNewKey)
+	a.handle("POST /api/v1/autopay/orders/{id}/approve", roleManager, a.approveAutopayOrder)
+	a.handle("POST /api/v1/autopay/orders/{id}/cancel", roleManager, a.cancelAutopayOrder)
+	a.handle("POST /api/v1/autopay/sms/{id}/match", roleManager, a.matchAutopaySMS)
 	a.handle("GET /api/v1/affiliates", roleManager, a.getAffiliates)
 	a.handle("PUT /api/v1/affiliates", roleManager, a.putAffiliates)
 

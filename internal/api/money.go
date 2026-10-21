@@ -46,8 +46,12 @@ func (a *API) listPayments(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) approvePayment(w http.ResponseWriter, r *http.Request) {
 	order := r.PathValue("order")
-	if !a.B.ApprovePayment(order, nil, "mit-panel", nil) {
+	switch a.B.ApprovePayment(order, nil, "mit-panel", nil) {
+	case bot.PaymentAlreadyDone:
 		fail(w, 409, "this payment was already reviewed or does not exist")
+		return
+	case bot.PaymentFailed:
+		fail(w, 502, "the panel did not create the service; the payment is still waiting")
 		return
 	}
 	ok(w, nil)
@@ -62,6 +66,77 @@ func (a *API) rejectPayment(w http.ResponseWriter, r *http.Request) {
 	}
 	if !a.B.RejectPayment(r.PathValue("order"), reason) {
 		fail(w, 409, "this payment was already reviewed or does not exist")
+		return
+	}
+	ok(w, nil)
+}
+
+// listPending is the "unapproved receipts" section as data: waiting receipts,
+// application-mode orders nothing confirmed, and deposits the phone could not
+// place — the three ways a payment can be paid but not credited.
+func (a *API) listPending(w http.ResponseWriter, r *http.Request) {
+	p := a.B.Pending()
+	receipts := rowsMap(p.Receipts)
+	for _, it := range receipts {
+		order, _ := it["id_order"].(string)
+		_, has := a.B.DB.KVOk("receipt_" + order)
+		it["has_receipt"] = has
+		inv, _ := it["invoice"].(string)
+		it["for_purchase"] = strings.HasPrefix(inv, "getconfigafterpay|")
+	}
+	ok(w, map[string]any{
+		"mode":       string(p.Mode),
+		"mode_label": p.Mode.Label(),
+		"phone":      p.Phone,
+		"waiting":    receipts,
+		"orders":     rowsMap(p.Orders),
+		"unmatched":  rowsMap(p.Unmatched),
+		"counts": map[string]int{
+			"waiting":   len(p.Receipts),
+			"orders":    len(p.Orders),
+			"unmatched": len(p.Unmatched),
+		},
+	})
+}
+
+func (a *API) approveAutopayOrder(w http.ResponseWriter, r *http.Request) {
+	switch a.B.ApproveAutopayOrder(r.PathValue("id")) {
+	case bot.PaymentAlreadyDone:
+		fail(w, 409, "this order is not open or does not exist")
+		return
+	case bot.PaymentFailed:
+		fail(w, 502, "the panel did not create the service; the payment is still waiting")
+		return
+	}
+	ok(w, nil)
+}
+
+func (a *API) cancelAutopayOrder(w http.ResponseWriter, r *http.Request) {
+	var f fields
+	_ = decode(r, &f)
+	// an empty reason is fine: the bot fills in the one the customer reads
+	if !a.B.CancelAutopayOrder(r.PathValue("id"), f.str("reason")) {
+		fail(w, 409, "this order is not open or does not exist")
+		return
+	}
+	ok(w, nil)
+}
+
+func (a *API) matchAutopaySMS(w http.ResponseWriter, r *http.Request) {
+	var f fields
+	_ = decode(r, &f)
+	orderID := f.str("order_id")
+	if !isDigits(orderID) {
+		fail(w, 400, "order_id must be the id of an open application-mode order")
+		return
+	}
+	done, matched := a.B.MatchUnmatchedSMS(r.PathValue("id"), orderID)
+	if !matched {
+		if done != nil && done["reason"] == bot.AutopayReasonDeliverFail {
+			fail(w, 502, "the money arrived but nothing could be credited; the deposit is still unmatched")
+			return
+		}
+		fail(w, 409, "this deposit is not unmatched, or that order is not open")
 		return
 	}
 	ok(w, nil)
@@ -154,18 +229,25 @@ func (a *API) getAutopay(w http.ResponseWriter, r *http.Request) {
 	case b.CronOn("card"):
 		mode = "no_review"
 	}
+	// what the bot is actually doing: a phone that never connected, or that
+	// went quiet, means customers fall back to sending receipts
+	effective := b.PayMode()
+	connected := b.AppConnected()
 	ok(w, map[string]any{
-		"mode":        mode,
-		"enabled":     s.S("status") == "on",
-		"last_seen":   s.S("last_seen"),
-		"device":      s.S("device_info"),
-		"pairing":     b.AutopayPairing(),
-		"endpoint":    "https://" + b.Cfg.Domain + "/autopay.php",
-		"open_orders": rowsMap(d.MustQuery("SELECT id, id_user, base_price, amount, status, id_order, created_at FROM autopay_order WHERE status = 'open' ORDER BY id DESC LIMIT 20")),
-		"recent_sms":  rowsMap(d.MustQuery("SELECT id, sender, amount, direction, card, sent_at, received_at, status, id_order FROM autopay_sms ORDER BY id DESC LIMIT 20")),
-		"paid_count":  d.Count("SELECT COUNT(*) FROM autopay_order WHERE status = 'paid'"),
-		"open_count":  d.Count("SELECT COUNT(*) FROM autopay_order WHERE status = 'open'"),
-		"sms_count":   d.Count("SELECT COUNT(*) FROM autopay_sms"),
+		"mode":            mode,
+		"enabled":         s.S("status") == "on",
+		"connected":       connected,
+		"effective_mode":  string(effective),
+		"effective_label": effective.Label(),
+		"last_seen":       s.S("last_seen"),
+		"device":          s.S("device_info"),
+		"pairing":         b.AutopayPairing(),
+		"endpoint":        "https://" + b.Cfg.Domain + "/autopay.php",
+		"open_orders":     rowsMap(d.MustQuery("SELECT id, id_user, base_price, amount, status, id_order, created_at FROM autopay_order WHERE status = 'open' ORDER BY id DESC LIMIT 20")),
+		"recent_sms":      rowsMap(d.MustQuery("SELECT id, sender, amount, direction, card, sent_at, received_at, status, id_order FROM autopay_sms ORDER BY id DESC LIMIT 20")),
+		"paid_count":      d.Count("SELECT COUNT(*) FROM autopay_order WHERE status = 'paid'"),
+		"open_count":      d.Count("SELECT COUNT(*) FROM autopay_order WHERE status = 'open'"),
+		"sms_count":       d.Count("SELECT COUNT(*) FROM autopay_sms"),
 	})
 }
 

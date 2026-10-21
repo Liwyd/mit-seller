@@ -44,6 +44,21 @@ func randomHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
+// addIndex is the index half of addField(): only ever adds, and only when it
+// is missing, so running EnsureSchema again is safe.
+func (d *DB) addIndex(table, name, cols string, report func(string)) {
+	if !d.tableExists(table) {
+		return
+	}
+	if d.Count("SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?", table, name) > 0 {
+		return
+	}
+	if _, err := d.Exec("ALTER TABLE " + ident(table) + " ADD INDEX " + ident(name) + " (" + cols + ")"); err != nil {
+		return
+	}
+	report("added index " + table + "." + name)
+}
+
 // EnsureSchema brings the database up to the layout the bot expects.
 // adminID is the main admin ($adminnumber), always kept in the admin table.
 func (d *DB) EnsureSchema(adminID string, report func(string)) error {
@@ -302,6 +317,12 @@ func (d *DB) EnsureSchema(adminID string, report func(string)) error {
 		d.addField("Payment_report", "invoice", "", "VARCHAR(300)", report)
 		d.addField("Payment_report", "Payment_Method", "", "VARCHAR(1000)", report)
 	}
+	// Every approve looks a receipt up by its order code and every cron tick
+	// sweeps by status; with only PRIMARY(id) both scan the whole table. The
+	// prefixes keep the keys inside InnoDB's index size limit — payment_Status
+	// is varchar(2000) and id_order varchar(500).
+	d.addIndex("Payment_report", "pay_idorder_idx", "id_order(64)", report)
+	d.addIndex("Payment_report", "pay_status_idx", "payment_Status(191)", report)
 
 	// ---- Discount / Giftcodeconsumed
 	if !d.tableExists("Discount") {
@@ -442,6 +463,9 @@ func (d *DB) EnsureSchema(adminID string, report func(string)) error {
         status varchar(20) NULL,
         id_order varchar(200) NULL,
         UNIQUE KEY autopay_sms_hash (hash))` + engine)
+	// the admin's "unapproved receipts" section lists unmatched deposits, and
+	// that list grows as every SMS the phone forwards is stored
+	d.addIndex("autopay_sms", "apsms_status_idx", "status(20)", report)
 
 	// ---- tables only the Go bot uses (the PHP bot never touches these)
 	d.Exec(`CREATE TABLE IF NOT EXISTS mit_kv (

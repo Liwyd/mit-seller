@@ -209,6 +209,7 @@ func kbAdmin() *tg.ReplyKeyboard {
 		row(txt("Admin.keyboardadmin.user_services"), txt("Admin.keyboardadmin.user_search"), txt("Admin.keyboardadmin.send_message")),
 		row(txt("Admin.keyboardadmin.tutorial_section"), txt("Admin.keyboardadmin.settings")),
 		row(tg.Txt(autopayAdminButton)),
+		row(txt("Admin.pending.button")),
 		row(tg.Txt(emojiIDButton)),
 		row(txt("users.backhome")),
 	)

@@ -118,18 +118,20 @@ func (c *Ctx) secBalance() bool {
 func (c *Ctx) cardToCard() {
 	d := c.db()
 	card := d.PaySetting("CartDescription")
-	note := ""
 	amount := php.Intval(c.user.S("Processing_value"))
-	if c.b.AutopayEnabled() {
+	mode := c.b.PayMode()
+	if mode == ModeApp {
 		if res, ok := c.b.AutopayReserve(c.fromID, c.user.S("Processing_value")); ok {
 			amount = res
 			c.setUser("Processing_value", amount)
 			c.user.Set("Processing_value", itoa(amount))
-			note = AutopayPriceNote(amount)
+		} else {
+			// every offset is taken: quote the plain amount and take the
+			// receipt flow instead of naming an amount nothing listens for
+			mode = ModeManual
 		}
 	}
-	waiting := note != ""
-	msg := sprintf("users.moeny.carttext", nf(float64(amount)), card) + note
+	msg := cardMessage(mode, int64(amount), card)
 	digits := re(`\d+`).FindAllString(card, -1)
 	if len(digits) > 0 && php.Intval(c.setting.S("copy_cart")) == 1 {
 		k := ik(
@@ -142,10 +144,10 @@ func (c *Ctx) cardToCard() {
 		c.del()
 		c.sendHTML(c.fromID, msg, c.kbBackUser())
 	}
-	if waiting {
-		c.step("home")
-	} else {
+	if mode.waitsForReceipt() {
 		c.step("cart_to_cart_user")
+	} else {
+		c.step("cart_to_cart_app")
 	}
 }
 
@@ -162,8 +164,7 @@ func (c *Ctx) secPayConfirm() bool {
 		switch st {
 		case "finished":
 			c.alert(T("users.Balance.finished"))
-			u := d.Select("user", "*", "id", rep.S("id_user"))
-			d.Update("user", "Balance", php.Intval(u.S("Balance"))+php.Intval(rep.S("price")), "id", rep.S("id_user"))
+			d.Exec("UPDATE user SET Balance = Balance + ? WHERE id = ?", php.Intval(rep.S("price")), rep.S("id_user"))
 			d.Update("Payment_report", "payment_Status", "paid", "id_order", rep.S("id_order"))
 			c.sendHTML(c.fromID, T("users.Balance.Confirmpay"), nil)
 			c.report(sprintf("users.Report.reportpayiranpay", c.fromID, nfs(rep.S("price"))))
@@ -178,8 +179,15 @@ func (c *Ctx) secPayConfirm() bool {
 		default:
 			c.alert(T("users.Balance.Failed"))
 		}
-	} else if c.stepIs("cart_to_cart_user") {
+	} else if c.stepIs("cart_to_cart_user") || c.stepIs("cart_to_cart_app") {
+		appMode := c.stepIs("cart_to_cart_app")
 		if !c.photo {
+			if appMode {
+				// no receipt is asked for here; the message must still reach
+				// the menu and support handlers instead of being rejected as
+				// a bad receipt
+				return false
+			}
 			c.sendHTML(c.fromID, T("users.Balance.Invalid-receipt"), nil)
 			return true
 		}
@@ -190,9 +198,14 @@ func (c *Ctx) secPayConfirm() bool {
 		if open := c.b.AutopayOpenOrder(c.fromID); open != nil && open.I("amount") == php.Intval(c.user.S("Processing_value")) {
 			c.b.AutopayAttach(open.S("id"), order)
 		}
-		if c.user.S("Processing_value_tow") == "getconfigafterpay" {
+		switch {
+		case appMode:
+			// the bank SMS confirms this one; the photo is kept as the
+			// admin's fallback rather than dropped on the floor
+			c.sendHTML(c.fromID, T("users.moeny.app_receipt_attached"), c.kbMain())
+		case c.user.S("Processing_value_tow") == "getconfigafterpay":
 			c.sendHTML(c.fromID, T("users.Balance.Send-receip-buy"), c.kbMain())
-		} else {
+		default:
 			c.sendHTML(c.fromID, T("users.Balance.Send-receipt"), c.kbMain())
 		}
 		k := ik(row(cb(T("users.Balance.Confirmpaying"), "Confirm_pay_"+order), cb(T("users.Balance.reject_pay"), "reject_pay_"+order)))

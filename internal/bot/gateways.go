@@ -26,7 +26,12 @@ func (b *Bot) NowPaymentsIPN(paymentID string) {
 		if rep.S("payment_Status") == "paid" {
 			return
 		}
-		b.DirectPayment(rep.S("id_order"), nil)
+		if !b.DirectPayment(rep.S("id_order"), nil) {
+			// the money left the customer's account at the gateway, so it
+			// must not be reported as credited while nothing moved
+			b.TellDeliverFailed(rep.S("id_user"), rep.S("id_order"))
+			return
+		}
 		uid := rep.S("id_user")
 		d.Update("user", "Processing_value", "0", "id", uid)
 		d.Update("user", "Processing_value_one", "0", "id", uid)
@@ -93,12 +98,17 @@ func (b *Bot) AqayepardakhtVerify(order, transid string) (string, string, string
 	if res.s("code") == "1" {
 		rep := d.Select("Payment_report", "*", "id_order", order)
 		if rep != nil && rep.S("payment_Status") != "paid" {
+			delivered := true
 			b.lockOrder(order, func() {
 				rep = d.Select("Payment_report", "*", "id_order", order)
 				if rep.S("payment_Status") == "paid" {
 					return
 				}
-				b.DirectPayment(order, nil)
+				if !b.DirectPayment(order, nil) {
+					delivered = false
+					b.TellDeliverFailed(rep.S("id_user"), order)
+					return
+				}
 				uid := rep.S("id_user")
 				d.Update("user", "Processing_value", "0", "id", uid)
 				d.Update("user", "Processing_value_one", "0", "id", uid)
@@ -108,6 +118,11 @@ func (b *Bot) AqayepardakhtVerify(order, transid string) (string, string, string
 					b.TG.SendMessage(ch, sprintf("Admin.Report.aqayepardakht", uid, price), nil, "HTML")
 				}
 			})
+			if !delivered {
+				// the browser must not be told the payment landed when
+				// nothing was credited
+				return sprintf("users.moeny.deliver_failed", order), "", price
+			}
 		}
 		return T("users.moeny.payment_success"), T("users.moeny.payment_success_dec"), price
 	}

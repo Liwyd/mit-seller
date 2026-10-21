@@ -16,25 +16,6 @@ func sleepMs(ms int) { time.Sleep(time.Duration(ms) * time.Millisecond) }
 func (b *Bot) autopayPanelText() string {
 	s := b.AutopaySettings()
 	on := s.S("status") == "on"
-	seen := "—"
-	if s.S("last_seen") != "" {
-		if ts, ok := php.Strtotime(s.S("last_seen")); ok {
-			ago := nowUnix() - ts
-			switch {
-			case ago < 120:
-				seen = "همین الان ✅"
-			case ago < 3600:
-				seen = itoa(ago/60) + " دقیقه پیش"
-				if ago > 900 {
-					seen += " ⚠️"
-				} else {
-					seen += " ✅"
-				}
-			default:
-				seen = itoa(ago/3600) + " ساعت پیش ⚠️"
-			}
-		}
-	}
 	d := b.DB
 	open := d.Count("SELECT COUNT(*) FROM autopay_order WHERE status = 'open'")
 	paid := d.Count("SELECT COUNT(*) FROM autopay_order WHERE status = 'paid'")
@@ -49,7 +30,7 @@ func (b *Bot) autopayPanelText() string {
 	}
 	return "💳 <b>تأیید خودکار پرداخت</b>\n\n" +
 		"وضعیت: " + state + "\n" +
-		"آخرین ارتباط گوشی: " + seen + "\n" + dev +
+		"آخرین ارتباط گوشی: " + lastSeenLabel(s.S("last_seen")) + "\n" + dev +
 		"\nپرداخت‌های در انتظار واریز: " + itoa(open) + "\n" +
 		"پرداخت‌های خودکار تأییدشده: " + itoa(paid) + "\n" +
 		"پیامک‌های دریافتی: " + itoa(sms) + "\n\n" +
@@ -148,23 +129,43 @@ func (c *Ctx) admAutopay() bool {
 	return false
 }
 
+// PaymentOutcome is what an approval attempt did. The admin button and the
+// management API report it differently, but both must be able to tell
+// "already reviewed" from "the delivery failed and it is still waiting".
+type PaymentOutcome int
+
+const (
+	// PaymentApplied: the money or the service moved.
+	PaymentApplied PaymentOutcome = iota
+	// PaymentAlreadyDone: it was approved or rejected before.
+	PaymentAlreadyDone
+	// PaymentFailed: the panel refused the service, so nothing was credited
+	// and the payment is left waiting for a retry.
+	PaymentFailed
+)
+
 // ApprovePayment is the admin "approve receipt" action, shared with the
-// management API. It returns false when the payment was already handled.
-// afterDirect (optional) runs right after the payment was applied, before the
-// bookkeeping, matching where the PHP button handler edited the receipt.
-func (b *Bot) ApprovePayment(order string, c *Ctx, adminID string, afterDirect func()) (done bool) {
-	b.lockOrder(order, func() { done = b.approvePayment(order, c, adminID, afterDirect) })
-	return done
+// management API. afterDirect (optional) runs right after the payment was
+// applied, before the bookkeeping, matching where the PHP button handler
+// edited the receipt.
+func (b *Bot) ApprovePayment(order string, c *Ctx, adminID string, afterDirect func()) (out PaymentOutcome) {
+	b.lockOrder(order, func() { out = b.approvePayment(order, c, adminID, afterDirect) })
+	return out
 }
 
-func (b *Bot) approvePayment(order string, c *Ctx, adminID string, afterDirect func()) bool {
+func (b *Bot) approvePayment(order string, c *Ctx, adminID string, afterDirect func()) PaymentOutcome {
 	d := b.DB
 	rep := d.Select("Payment_report", "*", "id_order", order)
 	if rep == nil || rep.S("payment_Status") == "paid" || rep.S("payment_Status") == "reject" {
-		return false
+		return PaymentAlreadyDone
 	}
-	b.AutopayCloseByOrder(order, "manual")
-	b.DirectPayment(order, c)
+	// credit first. Closing the app's order or clearing the pending purchase
+	// before the money moved is what turned a failed delivery into a payment
+	// nobody could finish.
+	if !b.DirectPayment(order, c) {
+		b.TellDeliverFailed(rep.S("id_user"), order)
+		return PaymentFailed
+	}
 	if afterDirect != nil {
 		afterDirect()
 	}
@@ -173,15 +174,33 @@ func (b *Bot) approvePayment(order string, c *Ctx, adminID string, afterDirect f
 	d.Update("user", "Processing_value_one", "0", "id", uid)
 	d.Update("user", "Processing_value_tow", "0", "id", uid)
 	d.Update("Payment_report", "payment_Status", "paid", "id_order", order)
+	b.AutopayCloseByOrder(order, "manual")
 	if ch := d.Setting().S("Channel_Report"); ch != "" {
 		b.TG.SendMessage(ch, sprintf("Admin.Report.acceptcartresid", adminID, rep.S("price")), nil, "HTML")
 	}
-	return true
+	return PaymentApplied
 }
 
 // RejectPayment marks a receipt rejected and tells the customer why.
 func (b *Bot) RejectPayment(order, reason string) (done bool) {
 	b.lockOrder(order, func() { done = b.rejectPayment(order, reason) })
+	return done
+}
+
+// RejectPaymentPending is RejectPayment before the reason is known: the
+// admin is prompted for it afterwards, exactly as the PHP button did, but
+// the payment is taken out of every other approver's reach at once.
+func (b *Bot) RejectPaymentPending(order string) (done bool) {
+	b.lockOrder(order, func() {
+		d := b.DB
+		rep := d.Select("Payment_report", "*", "id_order", order)
+		if rep == nil || rep.S("payment_Status") == "paid" || rep.S("payment_Status") == "reject" {
+			return
+		}
+		d.Update("Payment_report", "payment_Status", "reject", "id_order", order)
+		b.AutopayCloseByOrder(order, "rejected")
+		done = true
+	})
 	return done
 }
 
@@ -206,8 +225,12 @@ func (c *Ctx) admPayments() bool {
 			k := ik(row(cb(T("users.moeny.paymentaccepted"), "none")))
 			c.b.TG.EditMessageCaption(c.fromID, c.messageID, c.caption, k)
 		}
-		if !c.b.ApprovePayment(order, c, c.fromID, edit) {
+		switch c.b.ApprovePayment(order, c, c.fromID, edit) {
+		case PaymentAlreadyDone:
 			c.alert(T("Admin.Payment.reviewedpayment"))
+			return true
+		case PaymentFailed:
+			c.alert(T("Admin.Payment.deliverfailed"))
 			return true
 		}
 	}
@@ -221,8 +244,13 @@ func (c *Ctx) admPayments() bool {
 			c.alert(T("Admin.Payment.reviewedpayment"))
 			return true
 		}
-		c.upd("Payment_report", "payment_Status", "reject", "id_order", order)
-		c.b.AutopayCloseByOrder(order, "rejected")
+		// locked, so a reject cannot race an approval into "credited and
+		// rejected" for the same payment; the reason is written once the
+		// admin sends it, as the PHP button did
+		if !c.b.RejectPaymentPending(order) {
+			c.alert(T("Admin.Payment.reviewedpayment"))
+			return true
+		}
 		c.sendHTML(c.fromID, T("Admin.Payment.Reasonrejecting"), kbBackAdmin())
 		c.step("reject-dec")
 		c.edit(c.textCallback, nil)

@@ -167,8 +167,13 @@ func (b *Bot) cronRemoveExpire() {
 // cronCard is "automatic confirmation without review": a card-to-card
 // receipt still waiting a minute after it was sent (and at most an hour) is
 // accepted, and the bot's admins are told to look at it themselves. When the
-// SMS check (autopay) is on it decides instead, so this stands aside.
-const cardAutoDelay = 60 // seconds after the receipt
+// SMS check (autopay) is on it decides instead, so this stands aside. A
+// receipt whose delivery fails stays waiting and is retried; it is never
+// marked paid on the strength of an attempt.
+const (
+	cardAutoDelay  = 60   // seconds after the receipt
+	cardAutoMaxAge = 3600 // stop auto-approving after an hour; it stays waiting
+)
 
 func (b *Bot) cronCard() {
 	d := b.DB
@@ -179,7 +184,7 @@ func (b *Bot) cronCard() {
 	for _, r := range d.MustQuery("SELECT * FROM Payment_report WHERE payment_Status = 'waiting' AND Payment_Method = 'cart to cart'") {
 		ts, ok := php.Strtotime(r.S("time"))
 		age := time.Now().Unix() - ts
-		if !ok || age >= 3600 || age < cardAutoDelay {
+		if !ok || age < cardAutoDelay || age >= cardAutoMaxAge {
 			continue
 		}
 		b.lockOrder(r.S("id_order"), func() {
@@ -188,10 +193,13 @@ func (b *Bot) cronCard() {
 				return
 			}
 			buyer := d.Select("user", "*", "id", rep.S("id_user"))
-			d.Update("Payment_report", "payment_Status", "paid", "id_order", rep.S("id_order"))
+			if !b.DirectPayment(rep.S("id_order"), nil) {
+				b.TellDeliverFailed(rep.S("id_user"), rep.S("id_order"))
+				return
+			}
 			d.Update("Payment_report", "dec_not_confirmed", "Confirmed by robot", "id_order", rep.S("id_order"))
+			d.Update("Payment_report", "payment_Status", "paid", "id_order", rep.S("id_order"))
 			b.AutopayCloseByOrder(rep.S("id_order"), "manual")
-			b.DirectPayment(rep.S("id_order"), nil)
 			if ch := setting.S("Channel_Report"); ch != "" {
 				b.TG.SendMessage(ch, sprintf("Admin.Report.autocart", buyer.S("id"), rep.S("price")), nil, "HTML")
 			}

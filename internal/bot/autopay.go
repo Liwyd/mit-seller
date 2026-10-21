@@ -185,7 +185,22 @@ func (b *Bot) AutopayCloseByOrder(order, status string) {
 	b.DB.Exec("UPDATE autopay_order SET status = ?, closed_at = ? WHERE id_order = ? AND status = 'open'", status, now(), order)
 }
 
-// autopayConfirm confirms a matched order (with or without a receipt).
+// Reasons autopayConfirm gives for not completing a payment.
+const (
+	// autopayReasonHandled: the receipt was already approved or rejected, so
+	// there is nothing left to do.
+	autopayReasonHandled = "already handled"
+)
+
+// AutopayReasonDeliverFail is the reason a match reports when the money
+// arrived but nothing could be credited or delivered. Callers must treat it
+// as "retry later", not as "give up": the payment is left waiting.
+const AutopayReasonDeliverFail = "delivery failed"
+
+// autopayConfirm confirms a matched order (with or without a receipt). The
+// bool is whether the payment went through; when it did not, the map's
+// "reason" says why and the payment is left waiting so the admin's
+// unapproved-receipts section can finish it.
 func (b *Bot) autopayConfirm(order db.Row, smsID int64) (map[string]any, bool) {
 	d := b.DB
 	idOrder := order.S("id_order")
@@ -202,14 +217,20 @@ func (b *Bot) autopayConfirm(order db.Row, smsID int64) (map[string]any, bool) {
 			order.S("id_user"), idOrder, php.DateNow("Y/m/d H:i:s"), order.S("amount"), tag)
 		d.Exec("UPDATE autopay_order SET id_order = ? WHERE id = ?", idOrder, order.S("id"))
 	}
-	handled := true
+	handled, delivered := true, false
 	b.lockOrder(idOrder, func() {
 		rep := d.Select("Payment_report", "*", "id_order", idOrder)
 		if rep == nil || rep.S("payment_Status") == "paid" || rep.S("payment_Status") == "reject" {
 			return
 		}
 		handled = false
-		b.DirectPayment(idOrder, nil)
+		delivered = b.DirectPayment(idOrder, nil)
+		if !delivered {
+			// the money arrived but the service did not: leave the payment
+			// waiting and the order open rather than reporting a success the
+			// customer will never see
+			return
+		}
 		// DirectPayment marks plain top-ups paid; a purchase-after-payment is
 		// marked here, the way the admin's approve button did.
 		d.Update("Payment_report", "payment_Status", "paid", "id_order", idOrder)
@@ -219,7 +240,12 @@ func (b *Bot) autopayConfirm(order db.Row, smsID int64) (map[string]any, bool) {
 	})
 	if handled {
 		d.Exec("UPDATE autopay_order SET status = 'manual', closed_at = ? WHERE id = ?", now(), order.S("id"))
-		return map[string]any{"reason": "already handled"}, false
+		return map[string]any{"reason": autopayReasonHandled}, false
+	}
+	if !delivered {
+		b.TellDeliverFailed(order.S("id_user"), idOrder)
+		return map[string]any{"reason": AutopayReasonDeliverFail, "id_order": idOrder,
+			"id_user": order.S("id_user"), "amount": order.I("amount")}, false
 	}
 	d.Exec("UPDATE autopay_order SET status = 'paid', closed_at = ?, sms_id = ? WHERE id = ?", now(), smsID, order.S("id"))
 	d.Exec("UPDATE autopay_sms SET status = 'matched', id_order = ? WHERE id = ?", idOrder, smsID)
@@ -274,8 +300,14 @@ func (b *Bot) AutopayHandleSMS(raw, sender, sentAt string) map[string]any {
 	}
 	done, ok := b.autopayConfirm(order, smsID)
 	if !ok {
-		d.Exec("UPDATE autopay_sms SET status = 'skipped' WHERE id = ?", smsID)
-		return map[string]any{"result": "skipped", "reason": done["reason"]}
+		status := "skipped"
+		if done["reason"] == AutopayReasonDeliverFail {
+			// the money was there but nothing could be delivered: leave a
+			// trace the admin section lists, rather than a silent skip
+			status = "failed"
+		}
+		d.Exec("UPDATE autopay_sms SET status = ? WHERE id = ?", status, smsID)
+		return map[string]any{"result": status, "reason": done["reason"]}
 	}
 	b.autopayTellPaid(done)
 	return map[string]any{"result": "paid", "id_order": done["id_order"], "amount": done["amount"]}
@@ -309,13 +341,108 @@ func (b *Bot) autopayTellUnmatched(amount int64) {
 	}
 }
 
-// AutopayPriceNote is what the customer is told to pay.
-func AutopayPriceNote(amount int64) string {
-	return "\n\n⚠️ مبلغ را <b>دقیقاً</b> " + nf(float64(amount)) + " تومان واریز کنید — نه کمتر، نه بیشتر." +
-		"\nاین عدد مخصوص سفارش شماست و پرداخت با همین عدد شناسایی می‌شود." +
-		"\n\n🤖 واریزی شما به‌صورت هوشمند و خودکار بررسی و ظرف چند ثانیه تأیید می‌شود؛" +
-		" <b>نیازی به فرستادن رسید نیست</b>." +
-		"\nاگر تا ۱۵ دقیقه بعد از واریز تأیید نشد، به پشتیبانی پیام بدهید."
+// AutopayOpenOrdersList is the open orders with their ids, for the admin's
+// "which deposit goes with which payment" picker.
+func (b *Bot) AutopayOpenOrdersList() []db.Row {
+	return b.DB.MustQuery("SELECT * FROM autopay_order WHERE status = 'open' ORDER BY id DESC LIMIT 8")
+}
+
+// ApproveAutopayOrder finishes an application-mode order the phone never
+// confirmed. It creates the receipt row the other flows would have had and
+// then runs the same credit path, so the money moves exactly once however
+// the approval happens. The lock covers the read of status, which is what
+// makes "two admins, one order" produce one credit instead of two.
+func (b *Bot) ApproveAutopayOrder(id string) (out PaymentOutcome) {
+	b.lockOrder("autopay:"+id, func() { out = b.approveAutopayOrder(id) })
+	return out
+}
+
+func (b *Bot) approveAutopayOrder(id string) PaymentOutcome {
+	d := b.DB
+	order := d.Select("autopay_order", "*", "id", id)
+	if order == nil || order.S("status") != "open" {
+		return PaymentAlreadyDone
+	}
+	idOrder := order.S("id_order")
+	if idOrder == "" {
+		idOrder = randHex(5)
+		tag := "0|0"
+		if u := d.Select("user", "*", "id", order.S("id_user")); u.Has() && u.S("Processing_value_tow") == "getconfigafterpay" {
+			tag = "getconfigafterpay|" + u.S("Processing_value_one")
+		}
+		d.Exec("INSERT INTO Payment_report (id_user, id_order, time, price, payment_Status, Payment_Method, invoice) VALUES (?, ?, ?, ?, 'waiting', 'cart to cart', ?)",
+			order.S("id_user"), idOrder, php.DateNow("Y/m/d H:i:s"), order.S("amount"), tag)
+		b.AutopayAttach(order.S("id"), idOrder)
+	}
+	out := b.ApprovePayment(idOrder, nil, "manual", nil)
+	if out != PaymentApplied {
+		return out
+	}
+	d.Exec("UPDATE autopay_order SET status = 'paid', closed_at = ? WHERE id = ?", now(), id)
+	return PaymentApplied
+}
+
+// CancelAutopayOrder drops an order the customer never paid. It takes the
+// same lock as the approve so a cancel arriving with one leaves either both
+// applied or neither — not a credited receipt under a rejected order. An
+// empty reason is filled in here: the customer is the one who reads it.
+func (b *Bot) CancelAutopayOrder(id, reason string) (done bool) {
+	if reason == "" {
+		reason = T("Admin.pending.cancel_reason")
+	}
+	b.lockOrder("autopay:"+id, func() { done = b.cancelAutopayOrder(id, reason) })
+	return done
+}
+
+func (b *Bot) cancelAutopayOrder(id, reason string) bool {
+	d := b.DB
+	order := d.Select("autopay_order", "*", "id", id)
+	if order == nil || order.S("status") != "open" {
+		return false
+	}
+	d.Exec("UPDATE autopay_order SET status = 'rejected', closed_at = ? WHERE id = ?", now(), id)
+	// with a receipt row the reject path already tells the customer; without
+	// one (no SMS ever confirmed it) say so here
+	if o := order.S("id_order"); o != "" {
+		b.RejectPayment(o, reason)
+	} else if d.Select("user", "id", "id", order.S("id_user")).Has() {
+		b.TG.SendMessage(order.S("id_user"), sprintf("users.moeny.rejectresid", reason, id), nil, "HTML")
+	}
+	return true
+}
+
+// MatchUnmatchedSMS binds a deposit the phone could not place to the order
+// the admin picked, and credits it the same way an automatic match would.
+func (b *Bot) MatchUnmatchedSMS(smsID, orderID string) (map[string]any, bool) {
+	d := b.DB
+	sms := d.Select("autopay_sms", "*", "id", smsID)
+	if sms == nil || sms.S("status") != "unmatched" {
+		return nil, false
+	}
+	order := d.Select("autopay_order", "*", "id", orderID)
+	if order == nil || order.S("status") != "open" {
+		return nil, false
+	}
+	// claim the deposit so a second tap cannot match it to another order and
+	// credit it twice; the WHERE is what makes it a claim rather than a write
+	res, err := d.Exec("UPDATE autopay_sms SET status = 'new' WHERE id = ? AND status = 'unmatched'", smsID)
+	if err != nil {
+		return nil, false
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return nil, false
+	}
+	done, ok := b.autopayConfirm(order, sms.I("id"))
+	if !ok {
+		status := "unmatched"
+		if done["reason"] == AutopayReasonDeliverFail {
+			status = "failed"
+		}
+		d.Exec("UPDATE autopay_sms SET status = ? WHERE id = ?", status, smsID)
+		return done, false
+	}
+	b.autopayTellPaid(done)
+	return done, true
 }
 
 // AutopayPairing is the "NXP1." string the Android app is paired with.

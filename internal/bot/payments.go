@@ -107,7 +107,12 @@ func (b *Bot) paymentStatus(id string) jmap {
 // DirectPayment is functions.php DirectPayment(): credits a confirmed
 // payment, or — when the payment was for a pending purchase — creates and
 // delivers that service. ctx may be nil (cron, autopay, payment callbacks).
-func (b *Bot) DirectPayment(orderID string, ctx *Ctx) {
+//
+// The bool is whether the money or the service actually moved. It is the
+// only thing callers may mark a payment paid on: reporting success when the
+// panel refused to create the service is what leaves a customer credited
+// nothing while the admin is told the payment went through.
+func (b *Bot) DirectPayment(orderID string, ctx *Ctx) (applied bool) {
 	c := ctx
 	if c == nil {
 		c = b.systemCtx()
@@ -134,7 +139,7 @@ func (b *Bot) DirectPayment(orderID string, ctx *Ctx) {
 				c.sendHTML(a, msg, nil)
 				d.Step("home", a)
 			}
-			return
+			return false
 		}
 		c.deliverAfterPayment(inv.S("id_user"), panel, out, userAc, inv.S("name_product"), inv.S("Service_time"), inv.S("Volume"), inv.S("id_invoice"))
 
@@ -159,11 +164,8 @@ func (b *Bot) DirectPayment(orderID string, ctx *Ctx) {
 			base = pricediscount
 		}
 		c.payCommission(buyer, base)
-		left := buyer.F("Balance") - price
-		if left <= 0 {
-			left = 0
-		}
-		d.Update("user", "Balance", php.NumStr(left), "id", buyer.S("id"))
+		// one statement, so two concurrent approvals cannot lose an update
+		d.Exec("UPDATE user SET Balance = GREATEST(Balance - ?, 0) WHERE id = ?", price, buyer.S("id"))
 		now := d.Select("user", "Balance", "id", inv.S("id_user")).S("Balance")
 		if ch := setting.S("Channel_Report"); ch != "" {
 			b.TG.Call("sendMessage", map[string]any{"chat_id": ch, "parse_mode": "HTML",
@@ -173,14 +175,36 @@ func (b *Bot) DirectPayment(orderID string, ctx *Ctx) {
 		if rep.S("Payment_Method") == "cart to cart" {
 			d.Update("invoice", "Status", "active", "id_invoice", inv.S("id_invoice"))
 		}
-		return
+		return true
 	}
-	d.Update("user", "Balance", php.Intval(buyer.S("Balance"))+php.Intval(rep.S("price")), "id", rep.S("id_user"))
+	// one statement, so two concurrent approvals cannot lose an update
+	d.Exec("UPDATE user SET Balance = Balance + ? WHERE id = ?", php.Intval(rep.S("price")), rep.S("id_user"))
 	d.Update("Payment_report", "payment_Status", "paid", "id_order", rep.S("id_order"))
 	if rep.S("Payment_Method") == "cart to cart" && c.callbackQueryID != "" {
 		b.TG.AnswerCallback(c.callbackQueryID, T("users.moeny.acceptedcart"), true)
 	}
-	c.sendHTML(rep.S("id_user"), sprintf("users.moeny.Charged.", php.NumberFormat(rep.F("price"), 0), rep.S("id_order")), nil)
+	if r := c.sendHTML(rep.S("id_user"), sprintf("users.moeny.Charged.", php.NumberFormat(rep.F("price"), 0), rep.S("id_order")), nil); !r.OK {
+		b.Log.Printf("payment %s: charged %s but the confirmation failed for chat %s: %s", orderID, rep.S("price"), rep.S("id_user"), r.Description)
+	}
+	return true
+}
+
+// TellDeliverFailed reports a payment whose money arrived but whose service
+// or credit did not move, so it stays visible instead of being quietly marked
+// paid while the admin is told it went through.
+func (b *Bot) TellDeliverFailed(idUser, order string) {
+	msg := "❌ <b>پول رسید ولی تحویل انجام نشد</b>\n\n" +
+		"کاربر: <code>" + idUser + "</code>\n" +
+		"کد پیگیری: <code>" + order + "</code>\n\n" +
+		"این پرداخت همچنان در انتظار است؛ از «🧾 رسیدهای تایید نشده» دوباره تأییدش کن."
+	for _, a := range b.DB.AdminIDs() {
+		if r := b.TG.SendMessage(a, msg, nil, "HTML"); !r.OK {
+			b.Log.Printf("deliver-failed notice for payment %s: could not reach chat %s: %s", order, a, r.Description)
+		}
+	}
+	if b.DB.Select("user", "id", "id", idUser).Has() {
+		b.TG.SendMessage(idUser, sprintf("users.moeny.deliver_failed", order), nil, "HTML")
+	}
 }
 
 // systemCtx is a Ctx for work that does not come from a Telegram update.
