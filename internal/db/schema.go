@@ -54,6 +54,9 @@ func (d *DB) addIndex(table, name, cols string, report func(string)) {
 		return
 	}
 	if _, err := d.Exec("ALTER TABLE " + ident(table) + " ADD INDEX " + ident(name) + " (" + cols + ")"); err != nil {
+		// say it: an index that is not there makes every approve and every
+		// cron sweep scan the table, and a silent skip looks like success
+		report("could not add index " + table + "." + name + ": " + err.Error())
 		return
 	}
 	report("added index " + table + "." + name)
@@ -318,11 +321,14 @@ func (d *DB) EnsureSchema(adminID string, report func(string)) error {
 		d.addField("Payment_report", "Payment_Method", "", "VARCHAR(1000)", report)
 	}
 	// Every approve looks a receipt up by its order code and every cron tick
-	// sweeps by status; with only PRIMARY(id) both scan the whole table. The
-	// prefixes keep the keys inside InnoDB's index size limit — payment_Status
-	// is varchar(2000) and id_order varchar(500).
+	// sweeps by status; with only PRIMARY(id) both scan the whole table. Both
+	// are prefix keys: payment_Status is varchar(2000) and id_order
+	// varchar(500), too long together for InnoDB's 3072-byte limit. 64 is
+	// picked over the column's own length because an adopted database can
+	// carry payment_Status as varchar(100), and MySQL rejects a prefix longer
+	// than the column (error 1089) — the key would silently never appear.
 	d.addIndex("Payment_report", "pay_idorder_idx", "id_order(64)", report)
-	d.addIndex("Payment_report", "pay_status_idx", "payment_Status(191)", report)
+	d.addIndex("Payment_report", "pay_status_idx", "payment_Status(64)", report)
 
 	// ---- Discount / Giftcodeconsumed
 	if !d.tableExists("Discount") {
