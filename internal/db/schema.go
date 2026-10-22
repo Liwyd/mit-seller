@@ -30,6 +30,10 @@ func (d *DB) addField(table, col, def, typ string, report func(string)) {
 		return
 	}
 	if _, err := d.Exec("ALTER TABLE " + ident(table) + " ADD " + ident(col) + " " + typ); err != nil {
+		// say it: a column the bot reads or writes that is not there is a
+		// permanent gap in a legacy database, and a silent skip looks like
+		// success, so the same failure has to be visible as for an index
+		report("could not add column " + table + "." + col + ": " + err.Error())
 		return
 	}
 	if def != "" {
@@ -121,6 +125,10 @@ func (d *DB) EnsureSchema(adminID string, report func(string)) error {
 				}
 			}
 		}
+		// a fresh table gets this from the UNIQUE in the CREATE above; a
+		// legacy table only got a bare column, and every /start with a ref
+		// code scans the whole user table without it
+		d.addIndex("user", "ref_code", "ref_code", report)
 	}
 
 	// ---- help
@@ -410,8 +418,14 @@ func (d *DB) EnsureSchema(adminID string, report func(string)) error {
         affiliatespercentage varchar(600)  NULL)` + engine)
 		d.Exec("INSERT INTO affiliates (description,id_media,status_commission,Discount,affiliatesstatus,affiliatespercentage) VALUES ('none','none','oncommission','onDiscountaffiliates','offaffiliates','0')")
 		report("created table affiliates")
-	} else if d.Count("SELECT COUNT(*) FROM affiliates") == 0 {
-		d.Exec("INSERT INTO affiliates (description,id_media,status_commission,Discount,affiliatesstatus,affiliatespercentage) VALUES ('none','none','oncommission','onDiscountaffiliates','offaffiliates','0')")
+	} else {
+		// a pre-existing affiliates table can predate these two columns, and
+		// the INSERT below names them, so reconcile before it could run
+		d.addField("affiliates", "affiliatesstatus", "offaffiliates", "VARCHAR(600)", report)
+		d.addField("affiliates", "affiliatespercentage", "0", "VARCHAR(600)", report)
+		if d.Count("SELECT COUNT(*) FROM affiliates") == 0 {
+			d.Exec("INSERT INTO affiliates (description,id_media,status_commission,Discount,affiliatesstatus,affiliatespercentage) VALUES ('none','none','oncommission','onDiscountaffiliates','offaffiliates','0')")
+		}
 	}
 
 	// ---- cancel_service
