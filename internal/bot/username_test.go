@@ -9,11 +9,11 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/Liwyd/mit-seller/internal/db"
 	"github.com/Liwyd/mit-seller/internal/panels"
+	"github.com/Liwyd/mit-seller/internal/php"
 	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
@@ -373,7 +373,7 @@ func TestTrialUsernameEntry(t *testing.T) {
 			if mode == "choice random" {
 				method = T("users.customuserchoice")
 			}
-			stamp := time.Now().Format("2006/01/02 15:04:05")
+			stamp := php.DateNow("Y/m/d H:i:s")
 			cache, _ := json.Marshal(map[string]any{"mit": map[string]string{"time": stamp, "access_token": "test"}, "marzban": map[string]string{"time": stamp, "access_token": "test"}})
 			panelRows := func() *sqlmock.Rows {
 				return sqlmock.NewRows([]string{"id", "name_panel", "MethodUsername", "type", "datelogin", "url_panel", "marzban_url_direct"}).AddRow("panel", "panel", method, "mit", string(cache), server.URL, server.URL)
@@ -477,7 +477,7 @@ func TestWalletCreationBilling(t *testing.T) {
 			c := &Ctx{b: &Bot{DB: d, PM: panels.New(d), TG: tg.New("test", server.URL, "")}, fromID: "42", datain: "confirmandgetservice", setting: db.Row{}, user: db.Row{
 				"Processing_value": {S: "panel"}, "Processing_value_one": {S: "product"}, "Processing_value_tow": {S: "ali"}, "Balance": {S: "100000"},
 			}}
-			stamp := time.Now().Format("2006/01/02 15:04:05")
+			stamp := php.DateNow("Y/m/d H:i:s")
 			cache, _ := json.Marshal(map[string]any{"mit": map[string]string{"time": stamp, "access_token": "test"}, "marzban": map[string]string{"time": stamp, "access_token": "test"}})
 			panelRows := func() *sqlmock.Rows {
 				return sqlmock.NewRows([]string{"id", "name_panel", "type", "datelogin", "url_panel", "marzban_url_direct"}).AddRow("panel", "panel", "mit", string(cache), server.URL, server.URL)
