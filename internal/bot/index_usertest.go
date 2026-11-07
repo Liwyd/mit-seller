@@ -46,10 +46,12 @@ func (c *Ctx) secUserTest() bool {
 		return true
 	}
 	var namePanel string
+	randomEntry := c.stepIs("createusertest") && c.datain == "" && c.text == T("users.randomusername")
 	if c.stepIs("createusertest") || c.stepIs("waitusernamechoice_test") {
 		namePanel = c.user.S("Processing_value_one")
-		if c.stepIs("createusertest") && !validServiceUsername(c.text) {
-			c.sendHTML(c.fromID, T("users.invalidusername"), c.kbBackUser())
+		c.text = strings.TrimSuffix(c.text, "\n")
+		if c.stepIs("createusertest") && !randomEntry && !validServiceUsername(c.text) {
+			c.sendHTML(c.fromID, T("users.invalidusername"), c.kbUsernameEntry())
 			return true
 		}
 	} else {
@@ -76,16 +78,28 @@ func (c *Ctx) secUserTest() bool {
 	if method == T("users.customusername") && !c.stepIs("createusertest") {
 		c.step("createusertest")
 		c.setUser("Processing_value_one", namePanel)
-		c.send(c.fromID, T("users.selectusername"), c.kbBackUser(), "html")
+		c.send(c.fromID, T("users.selectusername"), c.kbUsernameEntry(), "html")
 		return true
 	}
-	userAc := strings.ToLower(c.generateUsername(method, c.user.S("username"), random, c.text))
-	if c.usernameTaken(panel.S("name_panel"), userAc) {
-		userAc += itoa(randomInt(1000000, 9999999))
+	if randomEntry {
+		name, err := randomUsername()
+		if err != nil {
+			c.sendHTML(c.fromID, T("users.status.error"), c.kbUsernameEntry())
+			return true
+		}
+		c.text = name
+		method = T("users.customusername")
+	}
+	base := fitUsername(c.generateUsername(method, c.user.S("username"), random, c.text))
+	userAc, err := c.availableUsername(panel.S("name_panel"), base)
+	if err != nil || userAc == "" {
+		c.sendHTML(c.fromID, T("users.usertest.errorcreat"), c.kbMain())
+		c.step("home")
+		return true
 	}
 	expire := php.PlusHoursUnix(c.setting.S("time_usertest"))
 	dataLimit := c.setting.F("val_usertest") * 1048576
-	out := c.b.PM.CreateUser(namePanel, userAc, expire, dataLimit, true)
+	userAc, out := c.createService(namePanel, userAc, expire, dataLimit, true, func(string) error { return nil })
 	if !out.Isset("username") {
 		c.send(c.fromID, T("users.usertest.errorcreat"), c.kbMain(), "html")
 		msg := sprintf("users.buy.errorInCreate", out.MsgJSON(), c.fromID, c.username)
@@ -95,6 +109,7 @@ func (c *Ctx) secUserTest() bool {
 		c.step("home")
 		return true
 	}
+	c.usernameNotice(c.fromID, base, userAc)
 	idInvoice := randHex(4)
 	d.Exec("INSERT IGNORE INTO invoice (id_user, id_invoice, username, time_sell, Service_location, name_product, price_product, Volume, Service_time, Status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
 		c.fromID, idInvoice, userAc, nowUnix(), namePanel, "usertest", "0", c.setting.S("val_usertest"), c.setting.S("time_usertest"), "active")

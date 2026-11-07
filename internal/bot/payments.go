@@ -124,14 +124,20 @@ func (b *Bot) DirectPayment(orderID string, ctx *Ctx) (applied bool) {
 	buyer := d.Select("user", "*", "id", rep.S("id_user"))
 	parts := strings.Split(rep.S("invoice"), "|")
 	if parts[0] == "getconfigafterpay" && len(parts) > 1 {
-		inv := d.One("SELECT * FROM invoice WHERE username = ? AND Status = 'unpaid' LIMIT 1", parts[1])
+		inv := d.One("SELECT * FROM invoice WHERE username = ? AND id_user = ? AND Status = 'unpaid' LIMIT 1", parts[1], buyer.S("id"))
+		if inv == nil {
+			return false
+		}
 		userAc := inv.S("username")
 		panel := d.Select("marzban_panel", "*", "name_panel", inv.S("Service_location"))
 		var expire int64
 		if php.Intval(inv.S("Service_time")) != 0 {
 			expire = php.PlusDaysUnix(inv.S("Service_time"))
 		}
-		out := b.PM.CreateUser(panel.S("name_panel"), userAc, expire, php.Floatval(inv.S("Volume"))*math.Pow(1024, 3), false)
+		before := userAc
+		userAc, out := c.createService(panel.S("name_panel"), userAc, expire, php.Floatval(inv.S("Volume"))*math.Pow(1024, 3), false, func(name string) error {
+			return b.renamePendingUsername(inv.S("id_invoice"), buyer.S("id"), before, name)
+		})
 		if !out.Isset("username") {
 			c.sendHTML(buyer.S("id"), T("users.sell.ErrorConfig"), c.kbMainFor(buyer.S("id")))
 			msg := sprintf("users.buy.errorInCreate", out.MsgJSON(), buyer.S("id"), buyer.S("username"))
@@ -141,6 +147,8 @@ func (b *Bot) DirectPayment(orderID string, ctx *Ctx) (applied bool) {
 			}
 			return false
 		}
+		inv.Set("username", userAc)
+		c.usernameNotice(buyer.S("id"), before, userAc)
 		c.deliverAfterPayment(inv.S("id_user"), panel, out, userAc, inv.S("name_product"), inv.S("Service_time"), inv.S("Volume"), inv.S("id_invoice"))
 
 		price := inv.F("price_product")
@@ -171,7 +179,7 @@ func (b *Bot) DirectPayment(orderID string, ctx *Ctx) (applied bool) {
 			b.TG.Call("sendMessage", map[string]any{"chat_id": ch, "parse_mode": "HTML",
 				"text": sprintf("users.Report.reportbuyafterpay", inv.S("username"), inv.S("price_product"), inv.S("Volume"), inv.S("id_user"), buyer.S("number"), inv.S("Service_location"), nfs(now), buyer.S("username"))})
 		}
-		d.Update("invoice", "status", "active", "username", inv.S("username"))
+		d.Update("invoice", "status", "active", "id_invoice", inv.S("id_invoice"))
 		if rep.S("Payment_Method") == "cart to cart" {
 			d.Update("invoice", "Status", "active", "id_invoice", inv.S("id_invoice"))
 		}

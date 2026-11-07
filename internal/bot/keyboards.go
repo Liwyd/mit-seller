@@ -110,6 +110,9 @@ func (c *Ctx) keyTap() {
 		labels[k] = c.mainLabel(k)
 	}
 	labels["back_home"] = T("users.backhome")
+	if c.stepIs("endstepuser") || c.stepIs("createusertest") {
+		labels["random_username"] = T("users.randomusername")
+	}
 	if c.isAdmin {
 		labels["admin"] = T("Admin.commendadmin")
 	}
@@ -296,6 +299,11 @@ func kbChannel() *tg.ReplyKeyboard {
 func (c *Ctx) kbBackUser() *tg.ReplyKeyboard {
 	bc := LoadButtons(c.db())
 	return rk(row(bc.styled("back_home", txt("users.backhome"))))
+}
+
+func (c *Ctx) kbUsernameEntry() *tg.ReplyKeyboard {
+	bc := LoadButtons(c.db())
+	return rk(row(txt("users.randomusername")), row(bc.styled("back_home", txt("users.backhome"))))
 }
 func kbBackAdmin() *tg.ReplyKeyboard { return rk(backAdminRow()) }
 

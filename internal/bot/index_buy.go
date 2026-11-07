@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"fmt"
 	"html"
 	"math"
 	"strings"
@@ -137,7 +138,7 @@ func (c *Ctx) secBuy() bool {
 		}
 	case c.m(`^prodcutservices_(.*)`):
 		c.setUser("Processing_value_one", c.g(1))
-		c.send(c.fromID, T("users.selectusername"), c.kbBackUser(), "html")
+		c.send(c.fromID, T("users.selectusername"), c.kbUsernameEntry(), "html")
 		c.step("endstepuser")
 	case c.stepIs("waitusernamechoice_buy"):
 		// paid purchases offering "custom or random" (customuserchoice)
@@ -164,7 +165,7 @@ func (c *Ctx) buyUsernameChoice() bool {
 	switch c.datain {
 	case "usernamechoice_custom_buy":
 		c.del()
-		c.send(c.fromID, T("users.selectusername"), c.kbBackUser(), "html")
+		c.send(c.fromID, T("users.selectusername"), c.kbUsernameEntry(), "html")
 		c.step("endstepuser")
 		return true
 	case "usernamechoice_random_buy":
@@ -191,10 +192,22 @@ func (c *Ctx) buildInvoice() bool {
 	}
 	method := panel.S("MethodUsername")
 	var loc string
+	randomEntry := c.stepIs("endstepuser") && c.datain == "" && c.text == T("users.randomusername") &&
+		(method == T("users.customusername") || method == T("users.customuserchoice"))
 	switch {
+	case randomEntry:
+		loc = c.user.S("Processing_value_one")
+		name, err := randomUsername()
+		if err != nil {
+			c.sendHTML(c.fromID, T("users.status.error"), c.kbUsernameEntry())
+			return true
+		}
+		c.text = name
+		method = T("users.customusername")
 	case method == T("users.customusername") || (method == T("users.customuserchoice") && c.stepIs("endstepuser")):
+		c.text = strings.TrimSuffix(c.text, "\n")
 		if !validServiceUsername(c.text) {
-			c.sendHTML(c.fromID, T("users.invalidusername"), c.kbBackUser())
+			c.sendHTML(c.fromID, T("users.invalidusername"), c.kbUsernameEntry())
 			return true
 		}
 		loc = c.user.S("Processing_value_one")
@@ -231,10 +244,14 @@ func (c *Ctx) buildInvoice() bool {
 		return true
 	}
 	random := randHex(2)
-	userAc := strings.ToLower(c.generateUsername(method, c.username, random, c.text))
-	if c.usernameTaken(panel.S("name_panel"), userAc) {
-		userAc = itoa(randomInt(1000000, 9999999)) + userAc
+	base := fitUsername(c.generateUsername(method, c.username, random, c.text))
+	userAc, err := c.availableUsername(panel.S("name_panel"), base)
+	if err != nil || userAc == "" {
+		c.sendHTML(c.fromID, T("users.status.error2"), c.kbMain())
+		c.step("home")
+		return true
 	}
+	c.usernameNotice(c.fromID, base, userAc)
 	c.setUser("Processing_value_tow", userAc)
 	volume := p.S("Volume_constraint")
 	if php.LooseEq(volume, "0") || volume == "" {
@@ -248,7 +265,6 @@ func (c *Ctx) buildInvoice() bool {
 
 func (c *Ctx) payFromBalance() bool {
 	d := c.db()
-	pm := c.b.PM
 	c.edit(c.textCallback, ik())
 	parts := strings.Split(c.user.S("Processing_value_four"), "_")
 	p := c.productFor(c.user.S("Processing_value_one"), c.user.S("Processing_value"))
@@ -294,14 +310,36 @@ func (c *Ctx) payFromBalance() bool {
 	if d.Exists("invoice", "id_invoice", idInvoice) {
 		idInvoice = itoa(randomInt(1000000, 9999999)) + idInvoice
 	}
-	d.Exec("INSERT IGNORE INTO invoice (id_user, id_invoice, username, time_sell, Service_location, name_product, price_product, Volume, Service_time, Status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		c.fromID, idInvoice, userAc, nowUnix(), c.user.S("Processing_value"), p.S("name_product"), p.S("price_product"), p.S("Volume_constraint"), p.S("Service_time"), "active")
+	res, err := d.Exec("INSERT IGNORE INTO invoice (id_user, id_invoice, username, time_sell, Service_location, name_product, price_product, Volume, Service_time, Status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		c.fromID, idInvoice, userAc, nowUnix(), c.user.S("Processing_value"), p.S("name_product"), p.S("price_product"), p.S("Volume_constraint"), p.S("Service_time"), "pending_creation")
+	if err != nil {
+		c.sendHTML(c.fromID, T("users.sell.ErrorConfig"), c.kbMain())
+		c.step("home")
+		return true
+	}
+	if n, e := res.RowsAffected(); e != nil || n != 1 {
+		c.sendHTML(c.fromID, T("users.sell.ErrorConfig"), c.kbMain())
+		c.step("home")
+		return true
+	}
 	var expire int64
 	if p.S("Service_time") != "0" {
 		expire = php.PlusDaysUnix(p.S("Service_time"))
 	}
-	out := pm.CreateUser(panel.S("name_panel"), userAc, expire, php.Floatval(p.S("Volume_constraint"))*math.Pow(1024, 3), false)
+	before := userAc
+	userAc, out := c.createService(panel.S("name_panel"), userAc, expire, php.Floatval(p.S("Volume_constraint"))*math.Pow(1024, 3), false, func(name string) error {
+		res, err := d.Exec("UPDATE invoice SET username = ? WHERE id_invoice = ? AND id_user = ?", name, idInvoice, c.fromID)
+		if err != nil {
+			return err
+		}
+		if n, e := res.RowsAffected(); e != nil || n != 1 {
+			return fmt.Errorf("invoice changed while renaming")
+		}
+		c.setUser("Processing_value_tow", name)
+		return nil
+	})
 	if !out.Isset("username") {
+		d.Update("invoice", "Status", "creation_failed", "id_invoice", idInvoice)
 		c.sendHTML(c.fromID, T("users.sell.ErrorConfig"), c.kbMain())
 		msg := sprintf("users.buy.errorInCreate", out.MsgJSON(), c.fromID, c.username)
 		for _, a := range c.adminIDs {
@@ -310,6 +348,8 @@ func (c *Ctx) payFromBalance() bool {
 		c.step("home")
 		return true
 	}
+	d.Update("invoice", "Status", "active", "id_invoice", idInvoice)
+	c.usernameNotice(c.fromID, before, userAc)
 	if c.datain == "confirmandgetserviceDiscount" && len(parts) > 1 {
 		// Processing_value_four is "dis_<code>_<price>"; index.php looked
 		// the code up as parts[0] ("dis"), so usage was never counted.

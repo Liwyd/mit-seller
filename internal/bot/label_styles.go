@@ -169,6 +169,7 @@ var labelSuggestionKeys = []string{
 	"users.extend.title", "users.Extra_volume.sellextra", "users.removeconfig.btnremoveuser",
 	"users.page.next", "users.page.previous", "users.rulesaccept", "users.sendnumber",
 	"users.help.btninlinebuy", "users.customusername", "users.customidAndRandom",
+	"users.randomusername",
 }
 
 // LabelSuggestions lists button labels this bot actually shows, by group.

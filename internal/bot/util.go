@@ -143,10 +143,10 @@ func filterValidateURL(s string) bool {
 	return true
 }
 
-// validServiceUsername is preg_match('~(?!_)^[a-z][a-z\d_]{2,32}(?<!_)$~i').
+// Keep the legacy character rules, but respect Marzban's 32-character limit.
 func validServiceUsername(s string) bool {
 	s = strings.TrimSuffix(s, "\n")
-	if len(s) < 3 || len(s) > 33 {
+	if len(s) < 3 || len(s) > serviceUsernameMax {
 		return false
 	}
 	for i := 0; i < len(s); i++ {
