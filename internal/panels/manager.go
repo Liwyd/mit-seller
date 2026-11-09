@@ -165,6 +165,11 @@ func (m *Manager) saveLogin(field, val string, panel db.Row, data any) {
 // CreateUser is ManagePanel::createUser.
 func (m *Manager) CreateUser(namePanel, username string, expire int64, dataLimit float64, isTest bool) Out {
 	p := m.panelByName(namePanel)
+	if p == nil {
+		// name the panel that missed, so a service whose panel row is gone can
+		// be told apart from a panel that refused the create
+		return unsuccessful("Panel Not Found: " + namePanel)
+	}
 	switch p.S("type") {
 	case "marzban":
 		return m.marzbanCreate(p, username, expire, dataLimit, isTest)

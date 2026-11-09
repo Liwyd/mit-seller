@@ -130,6 +130,19 @@ func (b *Bot) DirectPayment(orderID string, ctx *Ctx) (applied bool) {
 		}
 		userAc := inv.S("username")
 		panel := d.Select("marzban_panel", "*", "name_panel", inv.S("Service_location"))
+		if panel == nil {
+			// The invoice is bound to a panel that is no longer configured (the
+			// panel row was deleted, or the invoice was never moved after it).
+			// Going on with an empty panel name would ask the panel layer to
+			// create a user against nothing and answer the generic "Panel Not
+			// Found", after which the customer is charged an error and every
+			// retry repeats it. Record what is actually wrong, leave the receipt
+			// waiting for the admin to repair the invoice, and move nothing.
+			missing := inv.S("Service_location")
+			b.Log.Printf("payment %s: invoice %s is bound to panel %q, which is not configured", orderID, inv.S("id_invoice"), missing)
+			d.Update("Payment_report", "dec_not_confirmed", "پنل سرویس پیدا نشد: "+missing, "id_order", rep.S("id_order"))
+			return false
+		}
 		var expire int64
 		if php.Intval(inv.S("Service_time")) != 0 {
 			expire = php.PlusDaysUnix(inv.S("Service_time"))
