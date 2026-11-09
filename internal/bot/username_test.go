@@ -422,7 +422,7 @@ func TestTrialUsernameEntry(t *testing.T) {
 }
 
 func TestWalletCreationBilling(t *testing.T) {
-	for _, mode := range []string{"normal", "duplicate", "rejected", "insert failed"} {
+	for _, mode := range []string{"normal", "duplicate", "duplicate starved", "rejected", "insert failed"} {
 		t.Run(mode, func(t *testing.T) {
 			sqldb, mock, err := sqlmock.New()
 			if err != nil {
@@ -432,6 +432,14 @@ func TestWalletCreationBilling(t *testing.T) {
 			mock.MatchExpectationsInOrder(false)
 			var attempts []string
 			var delivered string
+			// held is what the direct Marzban really holds; a create the panel
+			// refused (403/409) has left nothing there. "duplicate" pretends
+			// the panel's own answer was going to confirm a user that already
+			// survives on the direct side, which is what a stall looks like.
+			held := map[string]bool{}
+			if mode == "duplicate" {
+				held["ali"] = true
+			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				switch {
@@ -450,18 +458,19 @@ func TestWalletCreationBilling(t *testing.T) {
 					}
 					json.NewDecoder(r.Body).Decode(&p)
 					attempts = append(attempts, p.Email)
-					if mode == "duplicate" && len(attempts) == 1 {
+					if (mode == "duplicate" || mode == "duplicate starved") && len(attempts) == 1 {
 						w.WriteHeader(409)
 						w.Write([]byte(`{"success":false,"message":"This username already exists on the panel"}`))
 					} else if mode == "rejected" {
 						w.WriteHeader(403)
 						w.Write([]byte(`{"success":false,"message":"Insufficient traffic"}`))
 					} else {
+						held[p.Email] = true
 						w.Write([]byte(`{"success":true}`))
 					}
 				case r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/user/"):
 					name := strings.TrimPrefix(r.URL.Path, "/api/user/")
-					if len(attempts) > 0 && name == attempts[len(attempts)-1] {
+					if held[name] {
 						json.NewEncoder(w).Encode(map[string]any{"username": name, "subscription_url": "/sub/" + name})
 					} else {
 						w.WriteHeader(404)
@@ -482,15 +491,16 @@ func TestWalletCreationBilling(t *testing.T) {
 			panelRows := func() *sqlmock.Rows {
 				return sqlmock.NewRows([]string{"id", "name_panel", "type", "datelogin", "url_panel", "marzban_url_direct"}).AddRow("panel", "panel", "mit", string(cache), server.URL, server.URL)
 			}
-			panelReads := 4
-			if mode == "duplicate" {
-				panelReads = 8
-			}
-			if mode == "rejected" {
-				panelReads = 3
-			}
-			if mode == "insert failed" {
-				panelReads = 1
+			panelReads, ok := map[string]int{
+				// each login/token lookup re-reads the row once
+				"normal":            4,
+				"duplicate":         4, // converges on the user instead of renaming
+				"duplicate starved": 9, // rename + second create, as before
+				"rejected":          4, // extra: the direct lookup that finds nothing
+				"insert failed":     1,
+			}[mode]
+			if !ok {
+				t.Fatalf("no panel read count for mode %q", mode)
 			}
 			for i := 0; i < panelReads; i++ {
 				mock.ExpectQuery("SELECT.*marzban_panel").WithArgs("panel").WillReturnRows(panelRows())
@@ -503,12 +513,12 @@ func TestWalletCreationBilling(t *testing.T) {
 			} else {
 				insert.WillReturnResult(sqlmock.NewResult(0, 1))
 			}
-			if mode == "duplicate" {
+			if mode == "duplicate starved" {
 				mock.ExpectQuery("SELECT 1 FROM.*invoice").WillReturnRows(sqlmock.NewRows([]string{"1"}))
 				mock.ExpectExec("UPDATE invoice SET username").WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectExec("UPDATE.*user.*Processing_value_tow").WillReturnResult(sqlmock.NewResult(0, 1))
 			}
-			success := mode == "normal" || mode == "duplicate"
+			success := mode == "normal" || strings.HasPrefix(mode, "duplicate")
 			if success {
 				mock.ExpectExec("UPDATE.*invoice.*Status").WithArgs("active", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
 				mock.ExpectQuery("SELECT.*affiliates").WillReturnRows(sqlmock.NewRows([]string{"status_commission"}).AddRow("offcommission"))
@@ -526,7 +536,7 @@ func TestWalletCreationBilling(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantAttempts := 1
-			if mode == "duplicate" {
+			if mode == "duplicate starved" {
 				wantAttempts = 2
 			}
 			if mode == "insert failed" {
