@@ -17,6 +17,15 @@ import (
 
 func mitBase(p db.Row) string { return trimSlash(p.S("url_panel")) }
 
+// mitLoginPost is one attempt at Mit Panel's /login endpoint. A login has no
+// side effects, which is why a caller may run it again when the first one
+// never came back.
+func mitLoginPost(base, user, pass string) resp {
+	return req{method: "POST", url: base + "/login", timeout: 8 * time.Second,
+		insecure: true, body: formBody("username", user, "password", pass),
+		contentType: "application/x-www-form-urlencoded", headers: map[string]string{"accept": "application/json"}}.do()
+}
+
 // MitLogin is mit_login(): {"access_token":..} or {"error":..}.
 func (m *Manager) MitLogin(panel db.Row) map[string]any {
 	panel = m.panelByID(panel.S("id"))
@@ -27,9 +36,14 @@ func (m *Manager) MitLogin(panel db.Row) map[string]any {
 			return map[string]any{"access_token": tok, "time": e["time"]}
 		}
 	}
-	r := req{method: "POST", url: mitBase(panel) + "/login", timeout: 8 * time.Second,
-		insecure: true, body: formBody("username", panel.S("username_panel"), "password", panel.S("password_panel")),
-		contentType: "application/x-www-form-urlencoded", headers: map[string]string{"accept": "application/json"}}.do()
+	r := mitLoginPost(mitBase(panel), panel.S("username_panel"), panel.S("password_panel"))
+	if r.err != nil {
+		// this panel is sometimes seconds behind while its own upstream
+		// recovers, and a customer's payment may be waiting on the answer. A
+		// login has no side effects, so one more attempt is the cheap way
+		// through such a stall instead of a failed delivery.
+		r = mitLoginPost(mitBase(panel), panel.S("username_panel"), panel.S("password_panel"))
+	}
 	if r.err != nil {
 		return map[string]any{"error": r.err.Error()}
 	}
@@ -91,9 +105,18 @@ func (m *Manager) mitRequest(panel db.Row, method, path string, payload any) map
 	}
 	r := req{method: method, url: mitBase(panel) + path, insecure: true, body: body, contentType: ct, headers: h, timeout: 10 * time.Second}.do()
 	if r.err != nil {
-		return map[string]any{"detail": r.err.Error()}
+		// mark the difference between "the panel refused" and "we never got an
+		// answer at all", which a create has to tell apart
+		return map[string]any{"detail": r.err.Error(), "transport_error": true}
 	}
 	return jsonObj(r.body)
+}
+
+// isTransport reports whether a mitRequest reply is the client's own network
+// failure rather than an answer the panel sent back.
+func isTransport(res map[string]any) bool {
+	v, _ := res["transport_error"].(bool)
+	return v
 }
 
 // mitDashboardPath is the reseller's dashboard in Mit Panel.
@@ -183,6 +206,20 @@ func phpUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// mitCreateOut shapes the user the real Marzban reported into the same
+// create-shaped reply a panel success would have produced.
+func mitCreateOut(panel db.Row, username string, created map[string]any) Out {
+	sub := str(created, "subscription_url")
+	if !subURLRe.MatchString(sub) {
+		sub = trimSlash(panel.S("marzban_url_direct")) + "/" + strings.TrimLeft(sub, "/")
+	}
+	links := strList(created["links"])
+	if links == nil {
+		links = []string{}
+	}
+	return Out{"status": "successful", "username": username, "subscription_url": sub, "configs": links}
+}
+
 func (m *Manager) mitCreate(panel db.Row, username string, expire int64, dataLimit float64) Out {
 	exp := int64(0)
 	if expire != 0 {
@@ -194,21 +231,40 @@ func (m *Manager) mitCreate(panel db.Row, username string, expire int64, dataLim
 	}
 	res := m.mitRequest(panel, "POST", "/admin/user", payload)
 	if v, _ := res["success"].(bool); !v {
-		return unsuccessful(MitErrorMessage(res, "خطا در ساخت یوزر روی Mit"))
+		// The panel's answer can get stuck on its own upstream, and the client
+		// sees "context deadline exceeded" while the user was still created.
+		// Read the real Marzban directly: whatever it has for this username is
+		// deliverable and must not be reported as a failure.
+		checkExisting := func() Out {
+			created := m.mitDirectGetUser(panel, username)
+			if isset(created, "username") && !isset(created, "detail") {
+				return mitCreateOut(panel, username, created)
+			}
+			return nil
+		}
+		if out := checkExisting(); out != nil {
+			return out
+		}
+		// Only a create the panel never answered at all is re-run (the payload
+		// is the same user, so the second answer is either success or an
+		// "already exists" the direct check catches). One extra try keeps the
+		// worst case bounded; a refused create is reported as before.
+		if !isTransport(res) {
+			return unsuccessful(MitErrorMessage(res, "خطا در ساخت یوزر روی Mit"))
+		}
+		res = m.mitRequest(panel, "POST", "/admin/user", payload)
+		if v, _ := res["success"].(bool); !v {
+			if out := checkExisting(); out != nil {
+				return out
+			}
+			return unsuccessful(MitErrorMessage(res, "خطا در ساخت یوزر روی Mit"))
+		}
 	}
 	created := m.mitDirectGetUser(panel, username)
 	if isset(created, "detail") || !isset(created, "username") {
 		return Out{"status": "successful", "username": username, "subscription_url": "", "configs": []string{}}
 	}
-	sub := str(created, "subscription_url")
-	if !subURLRe.MatchString(sub) {
-		sub = trimSlash(panel.S("marzban_url_direct")) + "/" + strings.TrimLeft(sub, "/")
-	}
-	links := strList(created["links"])
-	if links == nil {
-		links = []string{}
-	}
-	return Out{"status": "successful", "username": username, "subscription_url": sub, "configs": links}
+	return mitCreateOut(panel, username, created)
 }
 
 func (m *Manager) mitData(panel db.Row, username string) Out {
