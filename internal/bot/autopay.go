@@ -209,10 +209,8 @@ func (b *Bot) autopayConfirm(order db.Row, smsID int64) (map[string]any, bool) {
 		// Paid without sending a receipt. If the customer was in the middle
 		// of buying (not just topping up), finish that purchase, as the
 		// receipt would have.
-		tag := "0|0"
-		if u := d.Select("user", "*", "id", order.S("id_user")); u.S("Processing_value_tow") == "getconfigafterpay" {
-			tag = "getconfigafterpay|" + u.S("Processing_value_one")
-		}
+		u := d.Select("user", "*", "id", order.S("id_user"))
+		tag := purchaseTag(d, u, order.S("id_user"), u.S("Processing_value_one"))
 		d.Exec("INSERT INTO Payment_report (id_user, id_order, time, price, payment_Status, Payment_Method, invoice) VALUES (?, ?, ?, ?, 'waiting', 'cart to cart', ?)",
 			order.S("id_user"), idOrder, php.DateNow("Y/m/d H:i:s"), order.S("amount"), tag)
 		d.Exec("UPDATE autopay_order SET id_order = ? WHERE id = ?", idOrder, order.S("id"))

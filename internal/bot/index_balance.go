@@ -3,15 +3,37 @@ package bot
 import (
 	"strings"
 
+	"github.com/Liwyd/mit-seller/internal/db"
 	"github.com/Liwyd/mit-seller/internal/php"
 	"github.com/Liwyd/mit-seller/internal/tg"
 )
 
-func (c *Ctx) invoiceTag() string {
-	if c.user.S("Processing_value_tow") == "getconfigafterpay" {
-		return c.user.S("Processing_value_tow") + "|" + c.user.S("Processing_value_one")
+// purchaseTag is the Payment_report.invoice value that ties a receipt to the
+// unpaid invoice it is meant to deliver; "0|0" means a plain top-up.
+//
+// Processing_value_one cannot be taken on trust. It carries the product code
+// while a product button is being handled (prodcutservices_) and again the
+// name of a service that is already active, and Processing_value_tow keeps
+// "getconfigafterpay" from an earlier purchase that a cron approval never
+// cleared. A tag naming something that is not one of the buyer's unpaid
+// invoices is what stranded a paid receipt: DirectPayment looks that name up
+// among unpaid invoices, finds nothing, and returns without moving either the
+// money or the service — while the customer has already paid.
+//
+// The lookup below is exactly the one DirectPayment will make on delivery, so
+// a tag that is written here is always a tag that can be honoured.
+func purchaseTag(d *db.DB, user db.Row, idUser, name string) string {
+	if user.S("Processing_value_tow") != "getconfigafterpay" || name == "" {
+		return "0|0"
 	}
-	return "0|0"
+	if d.One("SELECT * FROM invoice WHERE username = ? AND id_user = ? AND Status = 'unpaid' LIMIT 1", name, idUser) == nil {
+		return "0|0"
+	}
+	return "getconfigafterpay|" + name
+}
+
+func (c *Ctx) invoiceTag() string {
+	return purchaseTag(c.db(), c.user, c.fromID, c.user.S("Processing_value_one"))
 }
 
 func (c *Ctx) insertPayment(order, method, status string) {
