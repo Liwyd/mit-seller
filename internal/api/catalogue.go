@@ -193,8 +193,7 @@ func (a *API) deleteCategory(w http.ResponseWriter, r *http.Request) {
 }
 
 // gift codes (Discount): one-time balance top-ups
-var letters = regexp.MustCompile(`^[A-Za-z]+$`)
-var alnum = regexp.MustCompile(`^[A-Za-z\d]+$`)
+var alnum = regexp.MustCompile(`^[A-Za-z0-9]+$`)
 
 func (a *API) listGiftCodes(w http.ResponseWriter, r *http.Request) {
 	d := a.B.DB
@@ -213,8 +212,8 @@ func (a *API) createGiftCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	code, price := f.str("code"), f.str("price")
-	if !letters.MatchString(code) {
-		fail(w, 400, "code must be English letters only")
+	if !alnum.MatchString(code) {
+		fail(w, 400, "code must be English letters and digits")
 		return
 	}
 	if !isDigits(price) {
@@ -250,12 +249,12 @@ func (a *API) createDiscount(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "code must be English letters and digits")
 		return
 	}
-	if !isDigits(pct) || php.Intval(pct) > 100 {
-		fail(w, 400, "percent must be 0-100")
+	if !isDigits(pct) || php.Intval(pct) < 1 || php.Intval(pct) > 100 {
+		fail(w, 400, "percent must be 1-100")
 		return
 	}
-	if !isDigits(limit) {
-		fail(w, 400, "limit must be a number")
+	if !isDigits(limit) || php.Intval(limit) < 1 {
+		fail(w, 400, "limit must be a number of at least 1")
 		return
 	}
 	first := "0"

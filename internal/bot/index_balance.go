@@ -258,6 +258,12 @@ func (c *Ctx) secDiscount() bool {
 			}
 		}
 		code := d.One("SELECT * FROM Discount WHERE code = ? LIMIT 1", c.text)
+		if code == nil {
+			// inColumn compares loosely, so "100" also matched a code "0100";
+			// only a code that really exists may credit the wallet
+			c.sendHTML(c.fromID, T("users.Discount.notcode"), nil)
+			return true
+		}
 		d.Update("user", "Balance", php.NumStr(c.user.F("Balance")+code.F("price")), "id", c.fromID)
 		c.step("home")
 		c.sendHTML(c.fromID, sprintf("users.Discount.acceptdiscount", code.S("price")), c.kbMain())

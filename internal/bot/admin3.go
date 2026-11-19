@@ -251,7 +251,7 @@ func (c *Ctx) admExtraBalance() bool {
 			c.sendHTML(c.fromID, T("Admin.Discount.Discountused"), kbBackAdmin())
 			return true
 		}
-		if !re(`^[A-Za-z\d]+$`).MatchString(c.text) {
+		if !re(`^[A-Za-z0-9]+$`).MatchString(c.text) {
 			c.sendHTML(c.fromID, T("Admin.Discount.ErrorCode"), nil)
 			return true
 		}
@@ -260,19 +260,30 @@ func (c *Ctx) admExtraBalance() bool {
 		c.step("get_price_codesell")
 		c.setUser("Processing_value", c.text)
 	case c.stepIs("get_price_codesell"):
-		if !php.CtypeDigit(c.text) {
-			c.sendHTML(c.fromID, T("Admin.Balance.Invalidprice"), kbBackAdmin())
+		pct, ok := plainInt(normDigits(c.text))
+		if !ok || pct < 1 || pct > 100 {
+			c.sendHTML(c.fromID, T("Admin.Discount.invalidpercent"), kbBackAdmin())
 			return true
 		}
-		c.upd("DiscountSell", "price", c.text, "codeDiscount", pv)
+		c.upd("DiscountSell", "price", itoa(pct), "codeDiscount", pv)
 		c.sendHTML(c.fromID, T("Admin.Discountsell.getlimit"), kbBackAdmin())
 		c.step("getlimitcode")
 	case c.stepIs("getlimitcode"):
-		c.upd("DiscountSell", "limitDiscount", c.text, "codeDiscount", pv)
+		limit, ok := plainInt(normDigits(c.text))
+		if !ok || limit < 1 {
+			c.sendHTML(c.fromID, T("Admin.Discount.invalidlimit"), kbBackAdmin())
+			return true
+		}
+		c.upd("DiscountSell", "limitDiscount", itoa(limit), "codeDiscount", pv)
 		c.sendHTML(c.fromID, T("Admin.Discount.typediscount"), kbBackAdmin())
 		c.step("getusefirst")
 	case c.stepIs("getusefirst"):
-		c.upd("DiscountSell", "usefirst", c.text, "codeDiscount", pv)
+		first := normDigits(c.text)
+		if first != "0" && first != "1" {
+			c.sendHTML(c.fromID, T("Admin.Discount.typediscount"), kbBackAdmin())
+			return true
+		}
+		c.upd("DiscountSell", "usefirst", first, "codeDiscount", pv)
 		c.sendHTML(c.fromID, T("Admin.Discount.SaveCode"), kbAdmin())
 		c.step("home")
 	}

@@ -266,7 +266,6 @@ func (c *Ctx) buildInvoice() bool {
 func (c *Ctx) payFromBalance() bool {
 	d := c.db()
 	c.edit(c.textCallback, ik())
-	parts := strings.Split(c.user.S("Processing_value_four"), "_")
 	p := c.productFor(c.user.S("Processing_value_one"), c.user.S("Processing_value"))
 	if p == nil {
 		c.sendHTML(c.fromID, T("users.status.error2"), c.kbMain())
@@ -290,11 +289,26 @@ func (c *Ctx) payFromBalance() bool {
 		return true
 	}
 	price := p.S("price_product")
+	discountCode := ""
 	if c.datain == "confirmandgetserviceDiscount" {
-		price = ""
-		if len(parts) > 2 {
-			price = parts[2]
+		// The button can be pressed on any old invoice message, so neither the
+		// state nor the price it carries is trusted: a code must really be
+		// applied, and the price is worked out again for the product being
+		// bought now.
+		discountCode = sellDiscountState(c.user.S("Processing_value_four"))
+		if discountCode == "" {
+			c.sendHTML(c.fromID, T("users.Discount.notcode"), c.kbMain())
+			c.step("home")
+			return true
 		}
+		dp, errKey := c.checkSellDiscount(discountCode, p)
+		if errKey != "" {
+			c.setUser("Processing_value_four", "0")
+			c.sendHTML(c.fromID, T(errKey), c.kbMain())
+			c.step("home")
+			return true
+		}
+		price = php.FloatToString(dp)
 	}
 	balance := c.user.F("Balance")
 	if php.Floatval(price) > balance {
@@ -350,13 +364,9 @@ func (c *Ctx) payFromBalance() bool {
 	}
 	d.Update("invoice", "Status", "active", "id_invoice", idInvoice)
 	c.usernameNotice(c.fromID, before, userAc)
-	if c.datain == "confirmandgetserviceDiscount" && len(parts) > 1 {
-		// Processing_value_four is "dis_<code>_<price>"; index.php looked
-		// the code up as parts[0] ("dis"), so usage was never counted.
-		code := parts[1]
-		sd := d.Select("DiscountSell", "*", "codeDiscount", code)
-		d.Update("DiscountSell", "usedDiscount", php.Intval(sd.S("usedDiscount"))+1, "codeDiscount", code)
-		c.report(sprintf("users.Report.discountused", c.username, c.fromID, code))
+	if discountCode != "" {
+		bumpDiscountUse(d, discountCode)
+		c.report(sprintf("users.Report.discountused", c.username, c.fromID, discountCode))
 		c.setUser("Processing_value_four", "0")
 	}
 	c.payCommission(c.user, php.Floatval(price))
@@ -489,8 +499,7 @@ func (c *Ctx) applySellDiscount() bool {
 		c.sendHTML(c.fromID, T("users.Discount.notcode"), c.kbBackUser())
 		return true
 	}
-	sd := d.Select("DiscountSell", "*", "codeDiscount", c.text)
-	if sd == nil {
+	if d.Select("DiscountSell", "*", "codeDiscount", c.text) == nil {
 		c.sendHTML(c.fromID, T("Admin.Discount.invalidcodedis"), nil)
 		return true
 	}
@@ -500,23 +509,13 @@ func (c *Ctx) applySellDiscount() bool {
 		c.step("home")
 		return true
 	}
-	if php.LooseEq(sd.S("limitDiscount"), sd.S("usedDiscount")) {
-		c.sendHTML(c.fromID, T("users.Discount.erorrlimit"), nil)
+	price, errKey := c.checkSellDiscount(c.text, p)
+	if errKey != "" {
+		c.sendHTML(c.fromID, T(errKey), nil)
 		return true
-	}
-	if php.LooseEq(sd.S("usefirst"), "1") {
-		if d.SelectCount("invoice", "id_user", c.fromID) != 0 {
-			c.sendHTML(c.fromID, T("users.Discount.firstdiscount"), nil)
-			return true
-		}
 	}
 	c.sendHTML(c.fromID, T("users.Discount.correctcode"), c.kbMain())
 	c.step("payment")
-	result := sd.F("price") / 100 * p.F("price_product")
-	price := php.Round(p.F("price_product")-result, 0)
-	if price < 0 {
-		price = 0
-	}
 	priceS := php.FloatToString(price)
 	msg := sprintf("users.buy.invoicebuy", c.user.S("Processing_value_tow"), p.S("name_product"), p.S("Service_time"), priceS, p.S("Volume_constraint"), c.user.S("Balance"))
 	k := ik(row(cb(T("users.buy.payandGet"), "confirmandgetserviceDiscount")), row(cb(T("users.backhome"), "backuser")))

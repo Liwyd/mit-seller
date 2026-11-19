@@ -170,9 +170,9 @@ func (b *Bot) DirectPayment(orderID string, ctx *Ctx) (applied bool) {
 		dis := strings.Split(buyer.S("Processing_value_four"), "_")
 		if dis[0] == "dis" && len(dis) > 1 {
 			sd := d.Select("DiscountSell", "*", "codeDiscount", dis[1])
-			d.Update("DiscountSell", "usedDiscount", php.Intval(sd.S("usedDiscount"))+1, "codeDiscount", dis[1])
+			bumpDiscountUse(d, dis[1])
 			d.Exec("INSERT INTO Giftcodeconsumed (id_user,code) VALUES (?,?)", buyer.S("id"), dis[1])
-			pricediscount = price - sd.F("price")/100*price
+			pricediscount = discountedPrice(price, sd.F("price"))
 			discounted = true
 			if ch := setting.S("Channel_Report"); ch != "" {
 				b.TG.Call("sendMessage", map[string]any{"chat_id": ch, "text": sprintf("users.Report.discountused", buyer.S("username"), buyer.S("id"), dis[1])})

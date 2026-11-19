@@ -442,8 +442,12 @@ func (c *Ctx) admUserBalance() bool {
 		c.sendHTML(c.fromID, T("Admin.Discount.GetCode"), kbBackAdmin())
 		c.step("get_code")
 	case c.stepIs("get_code"):
-		if !re(`^[A-Za-z]+$`).MatchString(c.text) {
+		if !re(`^[A-Za-z0-9]+$`).MatchString(c.text) {
 			c.sendHTML(c.fromID, T("Admin.Discount.ErrorCode"), nil)
+			return true
+		}
+		if d.Exists("Discount", "code", c.text) {
+			c.sendHTML(c.fromID, T("Admin.Discount.giftcodeused"), kbBackAdmin())
 			return true
 		}
 		d.Exec("INSERT INTO Discount (code) VALUES (?)", c.text)
@@ -451,11 +455,12 @@ func (c *Ctx) admUserBalance() bool {
 		c.step("get_price_code")
 		c.setUser("Processing_value", c.text)
 	case c.stepIs("get_price_code"):
-		if !php.CtypeDigit(c.text) {
+		amount := normDigits(c.text)
+		if !php.CtypeDigit(amount) {
 			c.sendHTML(c.fromID, T("Admin.Balance.Invalidprice"), kbBackAdmin())
 			return true
 		}
-		c.upd("Discount", "price", c.text, "code", c.user.S("Processing_value"))
+		c.upd("Discount", "price", amount, "code", c.user.S("Processing_value"))
 		c.sendHTML(c.fromID, T("Admin.Discount.SaveCode"), kbAdmin())
 		c.step("home")
 	}
