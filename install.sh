@@ -23,6 +23,10 @@
 #   Update every Go bot on this server to the latest release:
 #     bash install.sh update
 #
+#   Delete a bot for good (service, config, site, certificate, database,
+#   backups); FINAL_BACKUP=1 sends one last bundle to its admin first:
+#     N=7 FINAL_BACKUP=1 bash install.sh remove
+#
 #   Show the keys Mit Panel needs:
 #     N=7 bash install.sh keys
 #
@@ -1164,6 +1168,64 @@ cmd_bot_unimport() {
     say "bot $N removed; the bot on the other server was never touched"
 }
 
+# remove: delete bot N from this server for good — its service, config,
+# nginx site, certificate, database and hourly backups — so the space comes
+# back. With FINAL_BACKUP=1 one last bundle (importable with bot-import) is
+# sent to the bot's admin in Telegram first, and nothing is deleted when that
+# send fails. A migrated bot's PHP directory is never touched, only named.
+#   N=7 FINAL_BACKUP=1 bash install.sh remove
+cmd_remove() {
+    N="${N:?set N= (bot number)}"
+    case "$N" in ''|*[!0-9]*) die "N must be a number" ;; esac
+    local CFG="$ETC/bot${N}.env" DOMAIN TOKEN CHAT BUSER PHPDIR="" TG
+    [ -f "$CFG" ] || die "$CFG not found; bot $N is not installed here"
+    DOMAIN=$(sed -n 's/^DOMAIN=//p' "$CFG" | tr -d '"' | sed -e 's#^https\?://##' -e 's#/.*##')
+    TOKEN=$(sed -n 's/^BOT_TOKEN=//p' "$CFG" | tr -d '"')
+    CHAT=$(sed -n 's/^ADMIN_ID=//p' "$CFG" | tr -d '"')
+    BUSER=$(sed -n 's/^BOT_USERNAME=//p' "$CFG" | tr -d '"')
+    TG="${MITSELLER_TELEGRAM_API:-https://api.telegram.org}"
+    [ -f "$ETC/bot${N}.phpdir" ] && PHPDIR=$(cat "$ETC/bot${N}.phpdir")
+
+    if [ "${FINAL_BACKUP:-0}" = 1 ]; then
+        [ -n "$TOKEN" ] && [ -n "$CHAT" ] || die "no BOT_TOKEN/ADMIN_ID in $CFG to send the final backup with; nothing was removed"
+        local OUT
+        OUT=$(mktemp "/tmp/mitseller-bot${N}-final-XXXXXX.tar.gz")
+        say "final backup of bot $N"
+        "$BIN" export-bundle -c "$CFG" --out "$OUT" >/dev/null || { rm -f "$OUT"; die "the final backup failed; nothing was removed"; }
+        curl -fsS -m 300 -F chat_id="$CHAT" -F document=@"$OUT" \
+            -F caption="بکاپ نهایی @$BUSER پیش از حذف کامل 🗄" "$TG/bot$TOKEN/sendDocument" >/dev/null 2>&1 ||
+            { rm -f "$OUT"; die "could not send the final backup to $CHAT in Telegram (too large, or the bot cannot message them); nothing was removed"; }
+        rm -f "$OUT"
+    fi
+
+    if [ -n "$TOKEN" ]; then
+        say "dropping the webhook"
+        curl -fsS -m 20 "$TG/bot$TOKEN/deleteWebhook?drop_pending_updates=true" >/dev/null 2>&1 || warn "could not drop the webhook"
+    fi
+
+    say "stopping mitseller@$N"
+    systemctl disable --now "mitseller@$N" 2>/dev/null || true
+    systemctl reset-failed "mitseller@$N" 2>/dev/null || true
+
+    rm -f "$ETC/bot${N}".*
+    rm -f "/etc/nginx/sites-available/mitseller${N}" "/etc/nginx/sites-enabled/mitseller${N}" "/etc/nginx/snippets/mitseller${N}.conf"
+    if nginx -t 2>/dev/null; then systemctl reload nginx || true; else warn "nginx -t fails after removing bot $N's site; check nginx"; fi
+
+    if [ -n "$DOMAIN" ] && command -v certbot >/dev/null; then
+        say "deleting the certificate for $DOMAIN"
+        certbot delete --cert-name "$DOMAIN" --non-interactive >/dev/null 2>&1 || warn "no certificate named $DOMAIN to delete"
+    fi
+
+    local DBNAME="mitseller${N}" DBUSER="mitseller${N}user"
+    say "dropping database $DBNAME"
+    mysql -e "DROP DATABASE IF EXISTS \`$DBNAME\`; DROP USER IF EXISTS '$DBUSER'@'localhost'; FLUSH PRIVILEGES;" ||
+        warn "could not drop $DBNAME; remove it by hand"
+
+    rm -f "$BACKUPS/bot${N}-bundle-"*.tar.gz
+    [ -n "$PHPDIR" ] && warn "the old PHP bot in $PHPDIR was left as it is; delete it by hand if you no longer need it"
+    say "bot $N ($DOMAIN) removed"
+}
+
 # bot-uncutover: put the webhook back on the other server. Run it THERE, after
 # its PHP bot is running again, to take the bot back from a Go server.
 cmd_bot_uncutover() {
@@ -1609,6 +1671,7 @@ case "${1:-new}" in
     bot-cutover) cmd_bot_cutover ;;
     bot-unimport) cmd_bot_unimport ;;
     bot-uncutover) cmd_bot_uncutover ;;
+    remove) cmd_remove ;;
     all) cmd_all ;;
-    *) die "usage: install.sh [all|new|migrate|migrate-all|legacy-adopt|register|panel-creds|provisioner-setup|provisioner-print|provisioner-teardown|panel-update|panel-link|backup-setup|backup-now|set-secret|rollback|update|keys|bot-export|bot-import|bot-cutover|bot-unimport|bot-uncutover]" ;;
+    *) die "usage: install.sh [all|new|migrate|migrate-all|legacy-adopt|register|panel-creds|provisioner-setup|provisioner-print|provisioner-teardown|panel-update|panel-link|backup-setup|backup-now|set-secret|rollback|update|keys|bot-export|bot-import|bot-cutover|bot-unimport|bot-uncutover|remove]" ;;
 esac
