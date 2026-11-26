@@ -1239,7 +1239,8 @@ cmd_remove() {
     mysql -e "DROP DATABASE IF EXISTS \`$DBNAME\`; DROP USER IF EXISTS '$DBUSER'@'localhost'; FLUSH PRIVILEGES;" ||
         warn "could not drop $DBNAME; remove it by hand"
 
-    rm -f "$BACKUPS/bot${N}-bundle-"*.tar.gz
+    # every backup of this bot: hourly bundles and the migration-time dumps
+    rm -f "$BACKUPS/bot${N}-"*
     if [ -n "$PHPDIR" ]; then
         # REMOVE_PHP=1 deletes the old PHP bot's directory too — only a
         # directory under /var/www that is not served by any other site.
