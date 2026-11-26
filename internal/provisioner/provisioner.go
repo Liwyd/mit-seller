@@ -87,7 +87,7 @@ type Result struct {
 	RegisterNote string `json:"register_note,omitempty"`
 }
 
-// Server serves /provision and /health.
+// Server serves /provision, /deprovision and /health.
 type Server struct {
 	// Token is the bearer token the panel must send. Required.
 	Token string
@@ -104,6 +104,8 @@ type Server struct {
 	LockTimeout time.Duration
 	// Run does the actual install; a test replaces it.
 	Run func(n int, req Request, secret string) error
+	// Remove does the actual removal of bot n; a test replaces it.
+	Remove func(n int, finalBackup bool) error
 
 	// rate limit for /provision: a plain fixed window, one client (the panel).
 	mu       sync.Mutex
@@ -150,6 +152,13 @@ func (s *Server) Handler() http.Handler {
 			return
 		}
 		s.provision(w, r)
+	}))
+	mux.Handle("POST /deprovision", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.authorized(r) {
+			writeErr(w, http.StatusUnauthorized, "not authorized")
+			return
+		}
+		s.deprovision(w, r)
 	}))
 	return mux
 }
@@ -241,6 +250,124 @@ func (s *Server) provision(w http.ResponseWriter, r *http.Request) {
 
 	s.logger().Printf("provisioned bot %d for %s (@%s)", n, req.Domain, res.BotUsername)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "data": res})
+}
+
+// RemoveRequest is what Mit Panel posts to delete a bot from this server.
+// The bot is named by its domain, the one thing the panel knows about it.
+type RemoveRequest struct {
+	Domain      string `json:"domain"`
+	FinalBackup bool   `json:"final_backup"`
+}
+
+// Validate refuses anything that is not a plain hostname.
+func (r *RemoveRequest) Validate() error {
+	switch {
+	case r.Domain == "":
+		return fmt.Errorf("domain is required")
+	case len(r.Domain) > 253 || !domainRE.MatchString(r.Domain):
+		return fmt.Errorf("domain is not a hostname")
+	case strings.Contains(r.Domain, "--"):
+		return fmt.Errorf("domain must not contain --")
+	}
+	return nil
+}
+
+// deprovision deletes one bot and everything it keeps on this server: the
+// service, its config, nginx site, certificate, database and backups. With
+// final_backup the bot's bundle is sent to its admin in Telegram first, and
+// nothing is deleted when that send fails.
+func (s *Server) deprovision(w http.ResponseWriter, r *http.Request) {
+	if !s.allowProvision() {
+		writeErr(w, http.StatusTooManyRequests, "too many requests")
+		return
+	}
+	if r.ContentLength > 4*1024 {
+		writeErr(w, http.StatusRequestEntityTooLarge, "request is too large")
+		return
+	}
+	var req RemoveRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4*1024))
+	if err := dec.Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	req.Domain = strings.ToLower(strings.TrimSpace(req.Domain))
+	if err := req.Validate(); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.logger().Printf("deprovision request for %s (final backup: %v)", req.Domain, req.FinalBackup)
+
+	unlock, err := s.acquireLock()
+	if err != nil {
+		writeErr(w, http.StatusConflict, "another install is running: "+err.Error())
+		return
+	}
+	defer unlock()
+
+	n, err := s.numberForDomain(req.Domain)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if n == 0 {
+		writeErr(w, http.StatusNotFound, "no bot with that domain on this server")
+		return
+	}
+	if err := s.remove(n, req.FinalBackup); err != nil {
+		s.logger().Printf("removing bot %d (%s) failed: %v", n, req.Domain, err)
+		writeErr(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	s.logger().Printf("removed bot %d (%s)", n, req.Domain)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "data": map[string]any{"n": n, "domain": req.Domain}})
+}
+
+// numberForDomain is the bot installed for domain, or 0 when there is none.
+func (s *Server) numberForDomain(domain string) (int, error) {
+	installed, err := s.installedNumbers()
+	if err != nil {
+		return 0, err
+	}
+	for _, n := range installed {
+		cfg, err := config.Load(filepath.Join(s.configDir(), fmt.Sprintf("bot%d.env", n)))
+		if err != nil {
+			continue
+		}
+		if strings.EqualFold(cfg.Domain, domain) {
+			return n, nil
+		}
+	}
+	return 0, nil
+}
+
+// defaultRemove shells out to install.sh remove, values as environment only.
+// The bot's token never travels in the request, but the installer's output
+// can carry it (curl errors print URLs), so it is scrubbed all the same.
+func (s *Server) defaultRemove(n int, finalBackup bool) error {
+	token := ""
+	if cfg, err := config.Load(filepath.Join(s.configDir(), fmt.Sprintf("bot%d.env", n))); err == nil {
+		token = cfg.BotToken
+	}
+	backup := "0"
+	if finalBackup {
+		backup = "1"
+	}
+	cmd := exec.Command(s.installer(), "remove")
+	cmd.Dir = filepath.Dir(s.installer())
+	cmd.Env = append(os.Environ(), fmt.Sprintf("N=%d", n), "FINAL_BACKUP="+backup)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("install.sh remove failed: %v: %s", err, strings.TrimSpace(scrub(string(out), token)))
+	}
+	return nil
+}
+
+func (s *Server) remove(n int, finalBackup bool) error {
+	if s.Remove != nil {
+		return s.Remove(n, finalBackup)
+	}
+	return s.defaultRemove(n, finalBackup)
 }
 
 // allowProvision is a fixed-window limit: at most 10 provisioning calls a

@@ -386,3 +386,91 @@ func TestScrubRemovesTheTokenEverywhere(t *testing.T) {
 		t.Errorf("scrub removed the context too: %s", out)
 	}
 }
+
+// ---------------------------------------------------------------- deprovision
+
+func postTo(t *testing.T, h http.Handler, path, token string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(raw)))
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func writeBotConfigFor(t *testing.T, cfgDir string, n int, domain string) {
+	t.Helper()
+	path := filepath.Join(cfgDir, "bot"+itoa(n)+".env")
+	if err := os.WriteFile(path, []byte("DOMAIN="+domain+"\nBOT_USERNAME=somebot\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeprovisionNeedsTheToken(t *testing.T) {
+	s, _ := testServer(t, nil)
+	s.Remove = func(int, bool) error { t.Fatal("removed without auth"); return nil }
+	for _, tok := range []string{"", "wrong"} {
+		if rec := postTo(t, s.Handler(), "/deprovision", tok, map[string]any{"domain": "a.example.com"}); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("token %q: got %d", tok, rec.Code)
+		}
+	}
+}
+
+func TestDeprovisionRejectsBadDomains(t *testing.T) {
+	s, _ := testServer(t, nil)
+	s.Remove = func(int, bool) error { t.Fatal("removed a bad domain"); return nil }
+	for _, d := range []string{"", "a;rm -rf /", "--x.example.com", "a--b.example.com", "nodot"} {
+		if rec := postTo(t, s.Handler(), "/deprovision", s.Token, map[string]any{"domain": d}); rec.Code != http.StatusBadRequest {
+			t.Fatalf("domain %q: got %d", d, rec.Code)
+		}
+	}
+}
+
+func TestDeprovisionUnknownDomainIs404(t *testing.T) {
+	s, cfgDir := testServer(t, nil)
+	writeBotConfigFor(t, cfgDir, 1, "one.example.com")
+	s.Remove = func(int, bool) error { t.Fatal("removed the wrong bot"); return nil }
+	if rec := postTo(t, s.Handler(), "/deprovision", s.Token, map[string]any{"domain": "other.example.com"}); rec.Code != http.StatusNotFound {
+		t.Fatalf("got %d", rec.Code)
+	}
+}
+
+func TestDeprovisionRemovesTheBotForThatDomain(t *testing.T) {
+	s, cfgDir := testServer(t, nil)
+	writeBotConfigFor(t, cfgDir, 1, "one.example.com")
+	writeBotConfigFor(t, cfgDir, 4, "four.example.com")
+	var gotN int
+	var gotBackup bool
+	s.Remove = func(n int, backup bool) error { gotN, gotBackup = n, backup; return nil }
+	rec := postTo(t, s.Handler(), "/deprovision", s.Token, map[string]any{"domain": "Four.Example.com", "final_backup": true})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	if gotN != 4 || !gotBackup {
+		t.Fatalf("removed n=%d backup=%v", gotN, gotBackup)
+	}
+	var body struct {
+		OK   bool `json:"ok"`
+		Data struct {
+			N int `json:"n"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || !body.OK || body.Data.N != 4 {
+		t.Fatalf("bad body %s", rec.Body.String())
+	}
+}
+
+func TestDeprovisionReportsAFailedRemoval(t *testing.T) {
+	s, cfgDir := testServer(t, nil)
+	writeBotConfigFor(t, cfgDir, 2, "two.example.com")
+	s.Remove = func(int, bool) error { return io.ErrUnexpectedEOF }
+	if rec := postTo(t, s.Handler(), "/deprovision", s.Token, map[string]any{"domain": "two.example.com"}); rec.Code != http.StatusBadGateway {
+		t.Fatalf("got %d", rec.Code)
+	}
+}
