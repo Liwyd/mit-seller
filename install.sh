@@ -24,7 +24,8 @@
 #     bash install.sh update
 #
 #   Delete a bot for good (service, config, site, certificate, database,
-#   backups); FINAL_BACKUP=1 sends one last bundle to its admin first:
+#   backups); FINAL_BACKUP=1 sends one last bundle to its admin first,
+#   REMOVE_PHP=1 also deletes a migrated bot's old PHP directory:
 #     N=7 FINAL_BACKUP=1 bash install.sh remove
 #
 #   Show the keys Mit Panel needs:
@@ -1177,7 +1178,7 @@ cmd_bot_unimport() {
 cmd_remove() {
     N="${N:?set N= (bot number)}"
     case "$N" in ''|*[!0-9]*) die "N must be a number" ;; esac
-    local CFG="$ETC/bot${N}.env" DOMAIN TOKEN CHAT BUSER PHPDIR="" TG
+    local CFG="$ETC/bot${N}.env" DOMAIN TOKEN CHAT BUSER PHPDIR="" SITE="" TG DBNAME DBUSER
     [ -f "$CFG" ] || die "$CFG not found; bot $N is not installed here"
     DOMAIN=$(sed -n 's/^DOMAIN=//p' "$CFG" | tr -d '"' | sed -e 's#^https\?://##' -e 's#/.*##')
     TOKEN=$(sed -n 's/^BOT_TOKEN=//p' "$CFG" | tr -d '"')
@@ -1185,6 +1186,15 @@ cmd_remove() {
     BUSER=$(sed -n 's/^BOT_USERNAME=//p' "$CFG" | tr -d '"')
     TG="${MITSELLER_TELEGRAM_API:-https://api.telegram.org}"
     [ -f "$ETC/bot${N}.phpdir" ] && PHPDIR=$(cat "$ETC/bot${N}.phpdir")
+    # A migrated bot keeps its PHP database and its own nginx site file (which
+    # includes this bot's snippet): both come from its config, not from N.
+    DBNAME=$(sed -n 's/^DB_NAME=//p' "$CFG" | tr -d '"'); DBNAME=${DBNAME:-mitseller${N}}
+    DBUSER=$(sed -n 's/^DB_USER=//p' "$CFG" | tr -d '"'); DBUSER=${DBUSER:-mitseller${N}user}
+    case "$DBNAME$DBUSER" in *[!A-Za-z0-9_]*) die "unexpected DB_NAME/DB_USER in $CFG; nothing was removed" ;; esac
+    [ -f "$ETC/bot${N}.nginx.path" ] && SITE=$(cat "$ETC/bot${N}.nginx.path")
+    if [ -n "$SITE" ] && { [ ! -f "$SITE" ] || ! grep -q "include /etc/nginx/snippets/mitseller${N}.conf;" "$SITE"; }; then
+        SITE=""   # not this bot's site any more: leave it alone
+    fi
 
     if [ "${FINAL_BACKUP:-0}" = 1 ]; then
         [ -n "$TOKEN" ] && [ -n "$CHAT" ] || die "no BOT_TOKEN/ADMIN_ID in $CFG to send the final backup with; nothing was removed"
@@ -1208,7 +1218,16 @@ cmd_remove() {
     systemctl reset-failed "mitseller@$N" 2>/dev/null || true
 
     rm -f "$ETC/bot${N}".*
-    rm -f "/etc/nginx/sites-available/mitseller${N}" "/etc/nginx/sites-enabled/mitseller${N}" "/etc/nginx/snippets/mitseller${N}.conf"
+    rm -f "/etc/nginx/sites-available/mitseller${N}" "/etc/nginx/sites-enabled/mitseller${N}"
+    if [ -n "$SITE" ]; then
+        rm -f "$SITE" "/etc/nginx/sites-enabled/$(basename "$SITE")"
+    fi
+    # Last: a site still including the snippet would fail nginx -t without it.
+    if grep -rqs "snippets/mitseller${N}.conf;" /etc/nginx/sites-enabled/ /etc/nginx/conf.d/; then
+        warn "another nginx site still includes mitseller${N}.conf; the snippet is kept"
+    else
+        rm -f "/etc/nginx/snippets/mitseller${N}.conf"
+    fi
     if nginx -t 2>/dev/null; then systemctl reload nginx || true; else warn "nginx -t fails after removing bot $N's site; check nginx"; fi
 
     if [ -n "$DOMAIN" ] && command -v certbot >/dev/null; then
@@ -1216,13 +1235,21 @@ cmd_remove() {
         certbot delete --cert-name "$DOMAIN" --non-interactive >/dev/null 2>&1 || warn "no certificate named $DOMAIN to delete"
     fi
 
-    local DBNAME="mitseller${N}" DBUSER="mitseller${N}user"
     say "dropping database $DBNAME"
     mysql -e "DROP DATABASE IF EXISTS \`$DBNAME\`; DROP USER IF EXISTS '$DBUSER'@'localhost'; FLUSH PRIVILEGES;" ||
         warn "could not drop $DBNAME; remove it by hand"
 
     rm -f "$BACKUPS/bot${N}-bundle-"*.tar.gz
-    [ -n "$PHPDIR" ] && warn "the old PHP bot in $PHPDIR was left as it is; delete it by hand if you no longer need it"
+    if [ -n "$PHPDIR" ]; then
+        # REMOVE_PHP=1 deletes the old PHP bot's directory too — only a
+        # directory under /var/www that is not served by any other site.
+        if [ "${REMOVE_PHP:-0}" = 1 ] && [[ "$PHPDIR" == /var/www/*/* ]] && [ -d "$PHPDIR" ] &&
+           ! grep -rqs "root $PHPDIR;" /etc/nginx/sites-enabled/; then
+            rm -rf -- "$PHPDIR" && say "deleted the old PHP bot in $PHPDIR"
+        else
+            warn "the old PHP bot in $PHPDIR was left as it is; delete it by hand (or REMOVE_PHP=1) if you no longer need it"
+        fi
+    fi
     say "bot $N ($DOMAIN) removed"
 }
 
